@@ -50,9 +50,9 @@ def fit_dg(x, y):
     ax.scatter(
         x,
         y,
-        s=12,
+        s=8,
+        alpha=0.6,
         color=COLORS["data"],
-        alpha=0.75,
         linewidths=0,
         label="data",
     )
@@ -62,7 +62,8 @@ def fit_dg(x, y):
         linestyle="--",
         color=COLORS["comp1"],
         label="peak 1",
-        lw=1.8,
+        lw=1.5,
+        alpha=0.7,
     )
     ax.plot(
         x,
@@ -70,7 +71,8 @@ def fit_dg(x, y):
         linestyle="--",
         color=COLORS["comp2"],
         label="peak 2",
-        lw=1.8,
+        lw=1.5,
+        alpha=0.7,
     )
     ax.vlines(
         [result.params["x01"].value, result.params["x02"].value],
@@ -90,6 +92,8 @@ def fit_dg(x, y):
         linewidths=1.2,
         alpha=0.8,
     )
+
+    ax.plot(x, result.best_fit, color=COLORS["fit"], lw=5, alpha=0.15)
     ax.plot(
         x,
         result.best_fit,
