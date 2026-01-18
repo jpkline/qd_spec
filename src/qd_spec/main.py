@@ -25,6 +25,8 @@ def main():
             "axes.edgecolor": FG_COLOR,
         }
     )
+    plt.rcParams["lines.dash_capstyle"] = "round"
+    plt.rcParams["lines.solid_capstyle"] = "round"
 
     file = pd.read_csv(r"D:\qd_anal\Raw_Spectra\OldSetup\new_emis.csv", names=["nm", "Abs"])
     fit_dg(file["nm"], file["Abs"])

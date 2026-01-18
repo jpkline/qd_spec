@@ -12,6 +12,15 @@ def single_gauss(x, a, x0, dx, yOff):
     return a * np.exp(-((x - x0) ** 2) / (2 * dx**2)) + yOff
 
 
+COLORS = {
+    "data": "#5DA9E9",  # muted sky blue
+    "fit": "#E6AF2E",  # warm amber (primary)
+    "comp1": "#9A6FB0",  # desaturated violet
+    "comp2": "#6FB98F",  # muted teal-green
+    "baseline": "#888888",  # neutral gray
+}
+
+
 def fit_dg(x, y):
     model = lmfit.Model(double_gauss)
     params = model.make_params(a1=10, x01=500, dx1=20, a2=10, x02=600, dx2=20, yOff=10)
@@ -38,18 +47,30 @@ def fit_dg(x, y):
             )
 
     fig, ax = plt.subplots()
-    ax.plot(x, y, "b.", label="data")
+    ax.scatter(
+        x,
+        y,
+        s=12,
+        color=COLORS["data"],
+        alpha=0.75,
+        linewidths=0,
+        label="data",
+    )
     ax.plot(
         x,
         single_gauss(x, **{k.rstrip("1"): result.params[k].value for k in ["a1", "x01", "dx1", "yOff"]}),
-        "g--",
+        linestyle="--",
+        color=COLORS["comp1"],
         label="peak 1",
+        lw=1.8,
     )
     ax.plot(
         x,
         single_gauss(x, **{k.rstrip("2"): result.params[k].value for k in ["a2", "x02", "dx2", "yOff"]}),
-        "m--",
+        linestyle="--",
+        color=COLORS["comp2"],
         label="peak 2",
+        lw=1.8,
     )
     ax.vlines(
         [result.params["x01"].value, result.params["x02"].value],
@@ -64,11 +85,21 @@ def fit_dg(x, y):
                 **{k.rstrip("2"): result.params[k].value for k in ["a2", "x02", "dx2", "yOff"]},
             ),
         ],
-        colors=["g", "m"],
-        linestyles="dotted",
-        alpha=0.3,
+        colors=[COLORS["comp1"], COLORS["comp2"]],
+        linestyles=":",
+        linewidths=1.2,
+        alpha=0.8,
     )
-    ax.plot(x, result.best_fit, "r-", label="fit")
+    ax.plot(
+        x,
+        result.best_fit,
+        color=COLORS["fit"],
+        label="fit",
+        lw=2.5,
+    )
+
+    ax.set_axisbelow(True)
+    ax.grid(True, alpha=0.15)  # TODO: maybe keep grid?
 
     # ax.legend()
     ax.set_xlabel("Wavelength [nm]")
