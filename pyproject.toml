@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+classifiers = ["Programming Language :: Python :: 3", "Topic :: Terminals"]
+dependencies = [
+    "matplotlib-sixel-backend @ git+https://github.com/jpkline/matplotlib-sixel-backend.git#main",
+]
+name = "qd_spec"
+license = "Apache-2.0"
+readme = "README.md"
+requires-python = ">=3.6"
+version = "0.1.0"
+
+[project.urls]
+"Bug Tracker" = "https://github.com/jpkline/qd_spec/issues"
+"Homepage" = "https://github.com/jpkline/qd_spec"
+
+[tool.ruff]
+line-length = 120
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[project.scripts]
+qd-spec = "qd_spec.main:main"
+qd_spec = "qd_spec.main:main"
