@@ -1,15 +1,13 @@
 import lmfit
+import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.ndimage import gaussian_filter1d
 
+matplotlib.use("module://matplotlib-sixel-backend")
 
-def double_gauss(x, a1, x01, dx1, a2, x02, dx2, yOff):
-    return a1 * np.exp(-((x - x01) ** 2) / (2 * dx1**2)) + a2 * np.exp(-((x - x02) ** 2) / (2 * dx2**2)) + yOff
-
-
-def single_gauss(x, a, x0, dx, yOff):
-    return a * np.exp(-((x - x0) ** 2) / (2 * dx**2)) + yOff
+FG_COLOR = "#F2F2F2"
+BG_COLOR = "#0C0C0C"
 
 
 COLORS = {
@@ -19,6 +17,33 @@ COLORS = {
     "comp2": "#6FB98F",
     "baseline": "#888888",
 }
+
+
+plt.style.use("dark_background")
+plt.rcParams.update(
+    {
+        "figure.facecolor": BG_COLOR,
+        "axes.facecolor": BG_COLOR,
+        "savefig.facecolor": BG_COLOR,
+        #
+        "text.color": FG_COLOR,
+        "axes.labelcolor": FG_COLOR,
+        "axes.titlecolor": FG_COLOR,
+        "xtick.color": FG_COLOR,
+        "ytick.color": FG_COLOR,
+        "axes.edgecolor": FG_COLOR,
+    }
+)
+plt.rcParams["lines.dash_capstyle"] = "round"
+plt.rcParams["lines.solid_capstyle"] = "round"
+
+
+def double_gauss(x, a1, x01, dx1, a2, x02, dx2, yOff):
+    return a1 * np.exp(-((x - x01) ** 2) / (2 * dx1**2)) + a2 * np.exp(-((x - x02) ** 2) / (2 * dx2**2)) + yOff
+
+
+def single_gauss(x, a, x0, dx, yOff):
+    return a * np.exp(-((x - x0) ** 2) / (2 * dx**2)) + yOff
 
 
 def fit_dg(x, y):
