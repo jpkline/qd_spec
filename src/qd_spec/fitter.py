@@ -13,11 +13,11 @@ def single_gauss(x, a, x0, dx, yOff):
 
 
 COLORS = {
-    "data": "#5DA9E9",  # muted sky blue
-    "fit": "#E6AF2E",  # warm amber (primary)
-    "comp1": "#9A6FB0",  # desaturated violet
-    "comp2": "#6FB98F",  # muted teal-green
-    "baseline": "#888888",  # neutral gray
+    "data": "#5DA9E9",
+    "fit": "#E6AF2E",
+    "comp1": "#9A6FB0",
+    "comp2": "#6FB98F",
+    "baseline": "#888888",
 }
 
 
