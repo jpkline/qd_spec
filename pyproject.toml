@@ -6,6 +6,11 @@ build-backend = "setuptools.build_meta"
 classifiers = ["Programming Language :: Python :: 3", "Topic :: Terminals"]
 dependencies = [
     "matplotlib-sixel-backend @ git+https://github.com/jpkline/matplotlib-sixel-backend.git#main",
+    "matplotlib",
+    "numpy",
+    "pandas",
+    "scipy",
+    "lmfit",
 ]
 name = "qd_spec"
 license = "Apache-2.0"
