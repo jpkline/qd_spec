@@ -7,3 +7,4 @@ def main():
     raw_data, ref, data = load_data()
     res = fit_dg(data["Wavelength"], data["Intensity"])
     plot(res, raw_data, ref, data, "Wavelength", "Intensity")
+    input("Does this look correct? [Y/n] ")
