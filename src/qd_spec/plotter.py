@@ -1,5 +1,6 @@
 import matplotlib
 import matplotlib.pyplot as plt
+from matplotlib.gridspec import GridSpec
 
 from .fitter import single_gauss
 
@@ -38,8 +39,11 @@ plt.rcParams["lines.solid_capstyle"] = "round"
 
 
 def plot(result, raw_data, ref, data, x_col, y_col):
-    fig, axes = plt.subplots(1, 3, figsize=(14, 4))
-    fig.tight_layout(pad=4.0)
+    fig = plt.figure(figsize=(8, 7))
+    gs = GridSpec(2, 2, height_ratios=[2, 3])  # bottom is taller
+
+    axes = [fig.add_subplot(gs[0, 0]), fig.add_subplot(gs[0, 1]), fig.add_subplot(gs[1, :])]
+
     axes[0].set_title("Raw Data")
     axes[1].set_title("Reference")
     axes[2].set_title("Fitted Data")
@@ -47,8 +51,8 @@ def plot(result, raw_data, ref, data, x_col, y_col):
     axes[0].scatter(
         raw_data[x_col],
         raw_data[y_col],
-        s=8,
-        # alpha=0.6,
+        s=4,
+        alpha=0.8,
         color=COLORS["data"],
         linewidths=0,
         label="data",
@@ -56,8 +60,8 @@ def plot(result, raw_data, ref, data, x_col, y_col):
     axes[1].scatter(
         ref[x_col],
         ref[y_col],
-        s=8,
-        # alpha=0.6,
+        s=4,
+        alpha=0.8,
         color=COLORS["data"],
         linewidths=0,
         label="data",
@@ -125,4 +129,5 @@ def plot(result, raw_data, ref, data, x_col, y_col):
         ax.set_xlabel("Wavelength [nm]")
         ax.set_ylabel("Intensity")
         ax.set_xlim(data[x_col].min(), data[x_col].max())
+    fig.tight_layout(pad=1.0)
     fig.show()
