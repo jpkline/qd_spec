@@ -23,12 +23,11 @@ matplotlib.use("module://matplotlib-sixel-backend")
 FG_COLOR = "#F2F2F2"
 BG_COLOR = "#0C0C0C"
 
-
 COLORS = {
     "data": "#5DA9E9",
     "fit": "#E6AF2E",
-    "comp1": "#9A6FB0",
-    "comp2": "#6FB98F",
+    "comp1": "#C97C5D",
+    "comp2": "#C6A0CF",
     "baseline": "#888888",
 }
 

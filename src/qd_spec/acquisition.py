@@ -52,7 +52,6 @@ first_data = sn.array_spectrum(spectrometer, wav)  # get specturm for the first 
 """
 # Get Y value ONLY :
 first_data = sn.getSpectrum_Y(spectrometer)
-PythonDriver_v2.6 (25Sept2024) Page | 19
 """
 print("First data:", first_data)
 # ==============================================

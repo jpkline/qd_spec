@@ -12,19 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import sys
-
-from .exporter import save_temp
-from .fitter import fit_dg
-from .loader import adjust_ref, load_data
-from .plotter import plot
+import pandas as pd
 
 
-def main():
-    fname, ref_fname = sys.argv[1:3] if len(sys.argv) > 2 else (None, None)
-    raw_data, ref = load_data(fname, ref_fname)
-    data = adjust_ref(raw_data, ref)
-    res = fit_dg(data["Wavelength"], data["Intensity"])
-    plot(res, raw_data, ref, data, "Wavelength", "Intensity")
-    if input("Does this look correct? [Y/n] ").casefold() != "n":
-        save_temp(res)
+def save_temp(result):
+    try:
+        df = pd.read_csv("temp_results.csv")
+    except (FileNotFoundError, pd.errors.EmptyDataError):
+        df = pd.DataFrame({k: v.value for k, v in result.params.items()}, index=[0])
+    else:
+        df = pd.concat([df, pd.DataFrame({k: v.value for k, v in result.params.items()}, index=[0])])
+    df.to_csv("temp_results.csv", index=False)
