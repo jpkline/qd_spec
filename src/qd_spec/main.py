@@ -1,10 +1,9 @@
-import pandas as pd
-
 from .fitter import fit_dg
+from .loader import load_data
 from .plotter import plot
 
 
 def main():
-    file = pd.read_csv(r"D:\qd_anal\Raw_Spectra\OldSetup\new_emis.csv", names=["nm", "Abs"])
-    res = fit_dg(file["nm"], file["Abs"])
-    plot(res, file["nm"], file["Abs"])
+    raw_data, ref, data = load_data()
+    res = fit_dg(data["Wavelength"], data["Intensity"])
+    plot(res, raw_data, ref, data, "Wavelength", "Intensity")

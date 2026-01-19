@@ -37,36 +37,60 @@ plt.rcParams["lines.dash_capstyle"] = "round"
 plt.rcParams["lines.solid_capstyle"] = "round"
 
 
-def plot(result, x, y):
-    fig, ax = plt.subplots()
-    ax.scatter(
-        x,
-        y,
+def plot(result, raw_data, ref, data, x_col, y_col):
+    fig, axes = plt.subplots(1, 3, figsize=(14, 4))
+    fig.tight_layout(pad=4.0)
+    axes[0].set_title("Raw Data")
+    axes[1].set_title("Reference")
+    axes[2].set_title("Fitted Data")
+
+    axes[0].scatter(
+        raw_data[x_col],
+        raw_data[y_col],
+        s=8,
+        # alpha=0.6,
+        color=COLORS["data"],
+        linewidths=0,
+        label="data",
+    )
+    axes[1].scatter(
+        ref[x_col],
+        ref[y_col],
+        s=8,
+        # alpha=0.6,
+        color=COLORS["data"],
+        linewidths=0,
+        label="data",
+    )
+
+    axes[2].scatter(
+        data[x_col],
+        data[y_col],
         s=8,
         alpha=0.6,
         color=COLORS["data"],
         linewidths=0,
         label="data",
     )
-    ax.plot(
-        x,
-        single_gauss(x, **{k.rstrip("1"): result.params[k].value for k in ["a1", "x01", "dx1", "yOff"]}),
+    axes[2].plot(
+        data[x_col],
+        single_gauss(data[x_col], **{k.rstrip("1"): result.params[k].value for k in ["a1", "x01", "dx1", "yOff"]}),
         linestyle="--",
         color=COLORS["comp1"],
         label="peak 1",
         lw=1.5,
         alpha=0.7,
     )
-    ax.plot(
-        x,
-        single_gauss(x, **{k.rstrip("2"): result.params[k].value for k in ["a2", "x02", "dx2", "yOff"]}),
+    axes[2].plot(
+        data[x_col],
+        single_gauss(data[x_col], **{k.rstrip("2"): result.params[k].value for k in ["a2", "x02", "dx2", "yOff"]}),
         linestyle="--",
         color=COLORS["comp2"],
         label="peak 2",
         lw=1.5,
         alpha=0.7,
     )
-    ax.vlines(
+    axes[2].vlines(
         [result.params["x01"].value, result.params["x02"].value],
         ymin=[result.params["yOff"].value] * 2,
         ymax=[
@@ -85,20 +109,20 @@ def plot(result, x, y):
         alpha=0.8,
     )
 
-    ax.plot(x, result.best_fit, color=COLORS["fit"], lw=5, alpha=0.15)
-    ax.plot(
-        x,
+    axes[2].plot(data[x_col], result.best_fit, color=COLORS["fit"], lw=5, alpha=0.15)
+    axes[2].plot(
+        data[x_col],
         result.best_fit,
         color=COLORS["fit"],
         label="fit",
         lw=2.5,
     )
 
-    ax.set_axisbelow(True)
-    ax.grid(True, alpha=0.15)  # TODO: maybe keep grid?
-
-    # ax.legend()
-    ax.set_xlabel("Wavelength [nm]")
-    ax.set_ylabel("Emission")
-    ax.set_xlim(x.min(), x.max())
+    # axes[2].legend()
+    for ax in axes:
+        ax.set_axisbelow(True)
+        ax.grid(True, alpha=0.15)  # TODO: maybe keep grid?
+        ax.set_xlabel("Wavelength [nm]")
+        ax.set_ylabel("Intensity")
+        ax.set_xlim(data[x_col].min(), data[x_col].max())
     fig.show()
