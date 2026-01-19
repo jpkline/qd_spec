@@ -44,7 +44,7 @@ def plot(result, raw_data, ref, data, x_col, y_col):
 
     axes = [fig.add_subplot(gs[0, 0]), fig.add_subplot(gs[0, 1]), fig.add_subplot(gs[1, :])]
 
-    axes[0].set_title("Raw Data")
+    axes[0].set_title("Sample")
     axes[1].set_title("Reference")
     axes[2].set_title("Fitted Data")
 

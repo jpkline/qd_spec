@@ -16,6 +16,10 @@ def load_data():
     ref = pd.read_csv(
         pathlib.Path(DIRECTORY) / REF_FNAME, skiprows=2, delimiter=r"\s+", names=["Wavelength", "Intensity"]
     )
+    return raw_data, ref
+
+
+def adjust_ref(raw_data, ref):
     data = raw_data.copy()
     data["Intensity"] -= ref["Intensity"]
-    return raw_data, ref, data
+    return data
