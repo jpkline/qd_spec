@@ -16,7 +16,7 @@
 from .acquisition import SpectrometerAcquisition
 from .exporter import save_temp
 from .fitter import fit_blank, fit_dg
-from .loader import adjust_ref
+from .loader import adjust_blank
 from .plotter import plot_blank, plot_dg, show_plot
 
 
@@ -28,7 +28,7 @@ def main():
         input("Ready for blank (Toluene)? Press Enter to continue...")
         blank = spec.acquire_spectrum()
 
-        adj_blank = adjust_ref(blank, blank_dark)
+        adj_blank = blank - blank_dark
         blank_res = fit_blank(wavs, adj_blank)
         show_plot(plot_blank(blank_res, wavs, blank, blank_dark, adj_blank))
 
@@ -37,8 +37,8 @@ def main():
         input("Ready for sample (QDs)? Press Enter to continue...")
         sample = spec.acquire_spectrum()
 
-        adj_sample = adjust_ref(sample, sample_dark)
-        data = adjust_ref(adj_sample, adj_blank)
+        adj_sample = sample - sample_dark
+        data = adjust_blank(adj_sample, wavs, blank_res)
         res = fit_dg(wavs, data)
         show_plot(plot_dg(res, wavs, sample, sample_dark, data))
         if input("Does this look correct? [Y/n] ").casefold() != "n":

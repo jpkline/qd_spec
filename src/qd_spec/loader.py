@@ -12,30 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import pathlib
-
-import pandas as pd
-
-# For now, just try one sample
-FNAME = "011726_Sample_070324a_b.SSM"
-REF_FNAME = "011726_Reference_Tolulene_b.SSM"
-
-DIRECTORY = r"C:\Users\jpkli\OneDrive - Benedictine College\LSC Research\Data\Laser_Spectra"
+from .fitter import single_gauss
 
 
-def load_data(fname=None, ref_fname=None):
-    if fname is None:
-        fname = FNAME
-    if ref_fname is None:
-        ref_fname = REF_FNAME
-    raw_data = pd.read_csv(
-        pathlib.Path(DIRECTORY) / fname, skiprows=2, delimiter=r"\s+", names=["Wavelength", "Intensity"]
-    )
-    ref = pd.read_csv(
-        pathlib.Path(DIRECTORY) / ref_fname, skiprows=2, delimiter=r"\s+", names=["Wavelength", "Intensity"]
-    )
-    return raw_data, ref
-
-
-def adjust_ref(raw_data, ref):
-    return raw_data - ref
+def adjust_blank(raw_data, wav, blank_res):
+    return raw_data - single_gauss(wav, **{i: blank_res.params[i] if i != "yOff" else 0 for i in blank_res.params})

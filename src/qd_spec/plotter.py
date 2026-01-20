@@ -145,7 +145,7 @@ def plot_nofit(wavs, raw, dark, data, t1="Blank", t3="Adjusted Blank"):
     axes = [fig.add_subplot(gs[0, 0]), fig.add_subplot(gs[0, 1]), fig.add_subplot(gs[1, :])]
 
     axes[0].set_title(t1)
-    axes[1].set_title("Reference")
+    axes[1].set_title("Dark")
     axes[2].set_title(t3)
 
     axes[0].scatter(
