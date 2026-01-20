@@ -51,3 +51,27 @@ def fit_dg(x, y):
             )
 
     return result
+
+
+def fit_blank(x, y):
+    model = lmfit.Model(single_gauss)
+    params = model.make_params(a=10, x0=700, dx=20, yOff=5)
+
+    params["a"].set(min=0.01)
+    params["dx"].set(min=10)
+    params["x0"].set(min=100, max=1200)
+
+    peak_est = x[gaussian_filter1d(y, sigma=5).argmax()]
+    params["x0"].set(value=peak_est)
+
+    result = model.fit(y, params, x=x)
+
+    print(result.fit_report())
+
+    for param, info in result.params.items():
+        if np.isclose(info.value, info.min) or np.isclose(info.value, info.max):
+            print(
+                f"WARNING: Parameter `{param}` hit a bound: value={info.value:.2f}, min={info.min:.2f}, max={info.max:.2f}"
+            )
+
+    return result
