@@ -12,19 +12,29 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import sys
 
+from .acquisition import SpectrometerAcquisition
 from .exporter import save_temp
 from .fitter import fit_dg
-from .loader import adjust_ref, load_data
+from .loader import adjust_ref
 from .plotter import plot
 
 
 def main():
-    fname, ref_fname = sys.argv[1:3] if len(sys.argv) > 2 else (None, None)
-    raw_data, ref = load_data(fname, ref_fname)
-    data = adjust_ref(raw_data, ref)
-    res = fit_dg(data["Wavelength"], data["Intensity"])
-    plot(res, raw_data, ref, data, "Wavelength", "Intensity")
-    if input("Does this look correct? [Y/n] ").casefold() != "n":
-        save_temp(res)
+    with SpectrometerAcquisition() as spec:
+        input("Ready for dark (empty)? Press Enter to continue...")
+        blank_dark = spec.acquire_spectrum()
+        input("Ready for blank (Toluene)? Press Enter to continue...")
+        blank = spec.acquire_spectrum()
+        input("Ready for dark (empty)? Press Enter to continue...")
+        sample_dark = spec.acquire_spectrum()
+        input("Ready for sample (QDs)? Press Enter to continue...")
+        sample = spec.acquire_spectrum()
+
+        adj_blank = adjust_ref(blank, blank_dark)
+        adj_sample = adjust_ref(sample, sample_dark)
+        data = adjust_ref(adj_sample, adj_blank)
+        res = fit_dg(data["Wavelength"], data["Intensity"])
+        plot(res, sample, sample_dark, data, "Wavelength", "Intensity")
+        if input("Does this look correct? [Y/n] ").casefold() != "n":
+            save_temp(res)
