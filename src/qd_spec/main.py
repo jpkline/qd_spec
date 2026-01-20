@@ -22,6 +22,7 @@ from .plotter import plot
 
 def main():
     with SpectrometerAcquisition() as spec:
+        wavs = spec.acquire_wavelengths()
         input("Ready for dark (empty)? Press Enter to continue...")
         blank_dark = spec.acquire_spectrum()
         input("Ready for blank (Toluene)? Press Enter to continue...")
@@ -34,7 +35,7 @@ def main():
         adj_blank = adjust_ref(blank, blank_dark)
         adj_sample = adjust_ref(sample, sample_dark)
         data = adjust_ref(adj_sample, adj_blank)
-        res = fit_dg(data["Wavelength"], data["Intensity"])
-        plot(res, sample, sample_dark, data, "Wavelength", "Intensity")
+        res = fit_dg(wavs, data)
+        plot(res, wavs, sample, sample_dark, data)
         if input("Does this look correct? [Y/n] ").casefold() != "n":
             save_temp(res)

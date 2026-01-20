@@ -38,6 +38,4 @@ def load_data(fname=None, ref_fname=None):
 
 
 def adjust_ref(raw_data, ref):
-    data = raw_data.copy()
-    data["Intensity"] -= ref["Intensity"]
-    return data
+    return raw_data - ref

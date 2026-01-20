@@ -51,7 +51,7 @@ plt.rcParams["lines.dash_capstyle"] = "round"
 plt.rcParams["lines.solid_capstyle"] = "round"
 
 
-def plot(result, raw_data, ref, data, x_col, y_col):
+def plot(result, wavs, raw_data, ref, data):
     fig = plt.figure(figsize=(8, 7))
     gs = GridSpec(2, 2, height_ratios=[2, 3])  # bottom is taller
 
@@ -62,8 +62,8 @@ def plot(result, raw_data, ref, data, x_col, y_col):
     axes[2].set_title("Fitted Data")
 
     axes[0].scatter(
-        raw_data[x_col],
-        raw_data[y_col],
+        wavs,
+        raw_data,
         s=4,
         alpha=0.8,
         color=COLORS["data"],
@@ -71,8 +71,8 @@ def plot(result, raw_data, ref, data, x_col, y_col):
         label="data",
     )
     axes[1].scatter(
-        ref[x_col],
-        ref[y_col],
+        wavs,
+        ref,
         s=4,
         alpha=0.8,
         color=COLORS["data"],
@@ -81,8 +81,8 @@ def plot(result, raw_data, ref, data, x_col, y_col):
     )
 
     axes[2].scatter(
-        data[x_col],
-        data[y_col],
+        wavs,
+        data,
         s=8,
         alpha=0.6,
         color=COLORS["data"],
@@ -90,8 +90,8 @@ def plot(result, raw_data, ref, data, x_col, y_col):
         label="data",
     )
     axes[2].plot(
-        data[x_col],
-        single_gauss(data[x_col], **{k.rstrip("1"): result.params[k].value for k in ["a1", "x01", "dx1", "yOff"]}),
+        wavs,
+        single_gauss(wavs, **{k.rstrip("1"): result.params[k].value for k in ["a1", "x01", "dx1", "yOff"]}),
         linestyle="--",
         color=COLORS["comp1"],
         label="peak 1",
@@ -99,8 +99,8 @@ def plot(result, raw_data, ref, data, x_col, y_col):
         alpha=0.7,
     )
     axes[2].plot(
-        data[x_col],
-        single_gauss(data[x_col], **{k.rstrip("2"): result.params[k].value for k in ["a2", "x02", "dx2", "yOff"]}),
+        wavs,
+        single_gauss(wavs, **{k.rstrip("2"): result.params[k].value for k in ["a2", "x02", "dx2", "yOff"]}),
         linestyle="--",
         color=COLORS["comp2"],
         label="peak 2",
@@ -126,9 +126,9 @@ def plot(result, raw_data, ref, data, x_col, y_col):
         alpha=0.8,
     )
 
-    axes[2].plot(data[x_col], result.best_fit, color=COLORS["fit"], lw=5, alpha=0.15)
+    axes[2].plot(wavs, result.best_fit, color=COLORS["fit"], lw=5, alpha=0.15)
     axes[2].plot(
-        data[x_col],
+        wavs,
         result.best_fit,
         color=COLORS["fit"],
         label="fit",
@@ -141,6 +141,6 @@ def plot(result, raw_data, ref, data, x_col, y_col):
         ax.grid(True, alpha=0.15)  # TODO: maybe keep grid?
         ax.set_xlabel("Wavelength [nm]")
         ax.set_ylabel("Intensity")
-        ax.set_xlim(data[x_col].min(), data[x_col].max())
+        ax.set_xlim(wavs.min(), wavs.max())
     fig.tight_layout(pad=1.0)
     fig.show()
