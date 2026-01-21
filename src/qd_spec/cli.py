@@ -30,7 +30,6 @@ class MeasurementCLI:
     def run(self) -> None:
         self._print_banner()
         with self._session_factory() as session:
-            self._acquire_blank(session)
             samples_measured = self._acquire_samples(session)
         self._print_summary(samples_measured)
 
@@ -48,28 +47,7 @@ class MeasurementCLI:
         print("=" * 35)
 
     def _print_summary(self, samples_measured: int) -> None:
-        print(f"\nSession completed! Measured {samples_measured} samples with 1 blank.")
-
-    def _acquire_blank(self, session: QDSession) -> None:
-        print("\nAcquiring blank measurement...")
-
-        while True:
-            acquirer = session.create_blank_acquirer(show_plot=True)
-            try:
-                self._pause("Ready for blank dark? Press Enter to continue...")
-                acquirer.capture_dark()
-                self._pause("Ready for blank (Toluene)? Press Enter to continue...")
-                acquirer.capture_blank()
-            except KeyboardInterrupt:
-                print("\nBlank acquisition cancelled.")
-                raise
-
-            if self._confirm("Accept this blank for the session? [Y/n] "):
-                print("Blank accepted and ready for measurements!")
-                return
-
-            session.clear_blank()
-            print("Blank rejected. Repeating acquisition...")
+        print(f"\nSession completed! Measured {samples_measured} samples.")
 
     def _acquire_samples(self, session: QDSession) -> int:
         sample_count = 0
@@ -92,7 +70,7 @@ class MeasurementCLI:
             print(f"Sample #{sample_number} completed!")
             sample_count += 1
 
-            if not self._confirm("\nMeasure another sample with the same blank? [Y/n] "):
+            if not self._confirm("\nMeasure another sample? [Y/n] "):
                 break
 
         return sample_count
