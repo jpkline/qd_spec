@@ -30,5 +30,5 @@ line-length = 120
 package-dir = { "" = "src" }
 
 [project.scripts]
-qd-spec = "qd_spec.main:main"
-qd_spec = "qd_spec.main:main"
+qd-spec = "qd_spec.cli:main"
+qd_spec = "qd_spec.cli:main"

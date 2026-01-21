@@ -14,51 +14,78 @@
 
 """Command-line interface for QD spectroscopy measurements."""
 
+from __future__ import annotations
+
+from collections.abc import Callable
+
 from .core import QDSession
 
 
-def main():
-    """Interactive CLI for QD measurements with blank-first workflow."""
+class MeasurementCLI:
+    """Interactive CLI orchestrated with explicit object state."""
 
-    def prompt_user(message):
-        input(message)
+    def __init__(self, session_factory: Callable[[], QDSession] = QDSession):
+        self._session_factory = session_factory
 
-    def confirm_action(message):
-        return input(message).casefold() != "n"
+    def run(self) -> None:
+        self._print_banner()
+        with self._session_factory() as session:
+            self._acquire_blank(session)
+            samples_measured = self._acquire_samples(session)
+        self._print_summary(samples_measured)
 
-    try:
+    def _prompt(self, message: str) -> str:
+        return input(message)
+
+    def _pause(self, message: str) -> None:
+        self._prompt(message)
+
+    def _confirm(self, message: str) -> bool:
+        return self._prompt(message).strip().casefold() not in {"n", "no"}
+
+    def _print_banner(self) -> None:
         print("QD Spectroscopy Measurement Tool")
         print("=" * 35)
 
-        # Use QDSession as a context manager to keep spectrometer open
-        with QDSession() as session:
-            # Step 1: Acquire and validate blank
-            print("\nStep 1: Acquiring blank measurement...")
-            session.acquire_blank(prompt_func=prompt_user, confirm_func=confirm_action, show_plot=True)
-            print("Blank accepted and ready for measurements!")
+    def _print_summary(self, samples_measured: int) -> None:
+        print(f"\nSession completed! Measured {samples_measured} samples with 1 blank.")
 
-            # Step 2: Acquire samples
-            sample_count = 1
-            while True:
-                print(f"\nStep 2: Acquiring sample #{sample_count}...")
-                try:
-                    session.acquire_sample(prompt_func=prompt_user, confirm_func=confirm_action, show_plot=True)
-                    print(f"Sample #{sample_count} completed!")
-                    sample_count += 1
+    def _acquire_blank(self, session: QDSession) -> None:
+        print("\nStep 1: Acquiring blank measurement...")
+        session.acquire_blank(prompt_func=self._pause, confirm_func=self._confirm, show_plot=True)
+        print("Blank accepted and ready for measurements!")
 
-                    if not confirm_action("\nMeasure another sample with the same blank? [Y/n] "):
-                        break
+    def _acquire_samples(self, session: QDSession) -> int:
+        sample_count = 0
+        while True:
+            sample_number = sample_count + 1
+            print(f"\nStep 2: Acquiring sample #{sample_number}...")
+            try:
+                session.acquire_sample(prompt_func=self._pause, confirm_func=self._confirm, show_plot=True)
+            except KeyboardInterrupt:
+                print("\nSample measurement cancelled.")
+                break
 
-                except KeyboardInterrupt:
-                    print("\nSample measurement cancelled.")
-                    break
+            print(f"Sample #{sample_number} completed!")
+            sample_count += 1
 
-            print(f"\nSession completed! Measured {sample_count - 1} samples with 1 blank.")
+            if not self._confirm("\nMeasure another sample with the same blank? [Y/n] "):
+                break
 
+        return sample_count
+
+
+def run_cli() -> None:
+    MeasurementCLI().run()
+
+
+def main() -> None:
+    try:
+        run_cli()
     except KeyboardInterrupt:
         print("\nSession cancelled by user.")
-    except Exception as e:
-        print(f"Error during measurement: {e}")
+    except Exception as exc:  # pragma: no cover - surfaced for operator visibility
+        print(f"Error during measurement: {exc}")
         raise
 
 
