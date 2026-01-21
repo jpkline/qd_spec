@@ -52,19 +52,42 @@ class MeasurementCLI:
 
     def _acquire_blank(self, session: QDSession) -> None:
         print("\nStep 1: Acquiring blank measurement...")
-        session.acquire_blank(prompt_func=self._pause, confirm_func=self._confirm, show_plot=True)
-        print("Blank accepted and ready for measurements!")
+
+        while True:
+            acquirer = session.create_blank_acquirer(show_plot=True)
+            try:
+                self._pause("Ready for blank dark? Press Enter to continue...")
+                acquirer.capture_dark()
+                self._pause("Ready for blank (Toluene)? Press Enter to continue...")
+                acquirer.capture_blank()
+            except KeyboardInterrupt:
+                print("\nBlank acquisition cancelled.")
+                raise
+
+            if self._confirm("Accept this blank for the session? [Y/n] "):
+                print("Blank accepted and ready for measurements!")
+                return
+
+            session.clear_blank()
+            print("Blank rejected. Repeating acquisition...")
 
     def _acquire_samples(self, session: QDSession) -> int:
         sample_count = 0
         while True:
             sample_number = sample_count + 1
             print(f"\nStep 2: Acquiring sample #{sample_number}...")
+            acquirer = session.create_sample_acquirer(show_plot=True)
             try:
-                session.acquire_sample(prompt_func=self._pause, confirm_func=self._confirm, show_plot=True)
+                self._pause("Ready for sample dark? Press Enter to continue...")
+                acquirer.capture_dark()
+                self._pause("Ready for sample (QDs)? Press Enter to continue...")
+                measurement = acquirer.capture_sample()
             except KeyboardInterrupt:
                 print("\nSample measurement cancelled.")
                 break
+
+            if self._confirm("Export this sample? [Y/n] "):
+                session.export_sample(measurement)
 
             print(f"Sample #{sample_number} completed!")
             sample_count += 1

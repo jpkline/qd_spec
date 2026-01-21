@@ -423,33 +423,81 @@ class ResultExporter(MeasurementExporter):
         df.to_csv(self.path, index=False)
 
 
-class BaseAcquirer(ABC):
-    vial_contents: str
+class BlankAcquirer:
+    """Explicit two-step blank acquisition orchestrated by the CLI."""
 
-    def __init__(self, session: QDSession):
-        self.session = session
-        self.vial_spec: np.ndarray | None = None
-        self.blank_spec: np.ndarray | None = None
+    def __init__(self, session: QDSession, show_plot: bool = True):
+        self._session = session
+        self._spectrometer = session._require_active_spectrometer()
+        self._show_plot = show_plot
+        self._wavelengths = self._spectrometer.acquire_wavelengths()
+        self._blank_dark: np.ndarray | None = None
+        self._blank_raw: np.ndarray | None = None
 
-    def capture_vial(self):
-        spec = self.session.spectrometer
-        if spec is None:
-            raise ValueError("Spectrometer not connected")
-        self.vial_spec = spec.acquire_spectrum()
+    def capture_dark(self) -> np.ndarray:
+        self._blank_dark = self._spectrometer.acquire_spectrum()
+        return self._blank_dark
 
-    def capture_blank(self):
-        spec = self.session.spectrometer
-        if spec is None:
-            raise ValueError("Spectrometer not connected")
-        self.blank_spec = spec.acquire_spectrum()
+    def capture_blank(self) -> BlankMeasurement:
+        self._blank_raw = self._spectrometer.acquire_spectrum()
+        return self._finalize()
+
+    def _finalize(self) -> BlankMeasurement:
+        if self._blank_dark is None:
+            raise ValueError("capture_dark() must be called before capture_blank().")
+        if self._blank_raw is None:
+            raise ValueError("capture_blank() must be called before finalizing.")
+
+        measurement = self._session.analyzer.analyze_blank(self._wavelengths, self._blank_dark, self._blank_raw)
+        if self._show_plot:
+            self._session.plotter.show(self._session.plotter.plot_blank(measurement))
+        self._session.blank = measurement
+        return measurement
 
 
-class BlankAcquirer(BaseAcquirer):
-    vial_contents = "Toluene"
+class SampleAcquirer:
+    """Sample acquisition that reuses the session's blank."""
 
+    def __init__(self, session: QDSession, show_plot: bool = True):
+        if session.blank is None:
+            raise ValueError("Blank measurement required before acquiring samples.")
+        self._session = session
+        self._spectrometer = session._require_active_spectrometer()
+        self._show_plot = show_plot
+        self._sample_dark: np.ndarray | None = None
+        self._sample_raw: np.ndarray | None = None
+        self._measurement: SampleMeasurement | None = None
 
-class SampleAcquirer(BaseAcquirer):
-    vial_contents = "QDs"
+    def capture_dark(self) -> np.ndarray:
+        self._sample_dark = self._spectrometer.acquire_spectrum()
+        return self._sample_dark
+
+    def capture_sample(self) -> SampleMeasurement:
+        if self._sample_dark is None:
+            raise ValueError("capture_dark() must be called before capture_sample().")
+        self._sample_raw = self._spectrometer.acquire_spectrum()
+        return self._finalize()
+
+    def export(self) -> None:
+        if self._measurement is None:
+            raise ValueError("capture_sample() must complete before exporting.")
+        self._session.export_sample(self._measurement)
+
+    def _finalize(self) -> SampleMeasurement:
+        if self._sample_dark is None:
+            raise ValueError("capture_dark() must be called before capture_sample().")
+        if self._sample_raw is None:
+            raise ValueError("capture_sample() must be called before finalizing.")
+
+        blank = self._session.blank
+        if blank is None:
+            raise ValueError("Blank measurement missing; acquire a new blank before sampling.")
+
+        measurement = self._session.analyzer.analyze_sample(blank, self._sample_dark, self._sample_raw)
+        if self._show_plot:
+            self._session.plotter.show(self._session.plotter.plot_sample(measurement))
+        self._measurement = measurement
+        return measurement
 
 
 class QDSession:
@@ -480,58 +528,23 @@ class QDSession:
             self.spectrometer.__exit__(exc_type, exc_val, exc_tb)
             self.spectrometer = None
 
-    def acquire_blank(
-        self,
-        prompt_func: Callable[[str], object] | None = None,
-        confirm_func: Callable[[str], bool] | None = None,
-        show_plot: bool = True,
-    ) -> BlankMeasurement:
-        spec = self._require_active_spectrometer()
-        prompt = prompt_func or (lambda *_: None)
-        confirm = confirm_func or (lambda *_: True)
+    def create_blank_acquirer(self, *, show_plot: bool = True) -> BlankAcquirer:
+        """Return a blank acquirer so the CLI can interleave prompts between captures."""
 
-        wavelengths = spec.acquire_wavelengths()
-        prompt("Ready for blank dark? Press Enter to continue...")
-        blank_dark = spec.acquire_spectrum()
+        return BlankAcquirer(self, show_plot=show_plot)
 
-        prompt("Ready for blank (Toluene)? Press Enter to continue...")
-        blank_raw = spec.acquire_spectrum()
+    def create_sample_acquirer(self, *, show_plot: bool = True) -> SampleAcquirer:
+        """Return a sample acquirer that reuses the session's validated blank."""
 
-        blank = self.analyzer.analyze_blank(wavelengths, blank_dark, blank_raw)
-        if show_plot:
-            self.plotter.show(self.plotter.plot_blank(blank))
-
-        if confirm("Accept this blank for the session? [Y/n] "):
-            self.blank = blank
-            return blank
-        raise ValueError("Blank rejected - please run acquire_blank() again")
-
-    def acquire_sample(
-        self,
-        prompt_func: Callable[[str], object] | None = None,
-        confirm_func: Callable[[str], bool] | None = None,
-        show_plot: bool = True,
-    ) -> SampleMeasurement:
-        spec = self._require_active_spectrometer()
         if self.blank is None:
-            raise ValueError("No blank available - call acquire_blank() first")
+            raise ValueError("No blank available - acquire a blank before measuring samples.")
+        return SampleAcquirer(self, show_plot=show_plot)
 
-        prompt = prompt_func or (lambda *_: None)
-        confirm = confirm_func or (lambda *_: True)
+    def export_sample(self, sample: SampleMeasurement) -> None:
+        self.exporter.export(sample)
 
-        prompt("Ready for sample dark? Press Enter to continue...")
-        sample_dark = spec.acquire_spectrum()
-
-        prompt("Ready for sample (QDs)? Press Enter to continue...")
-        sample_raw = spec.acquire_spectrum()
-
-        sample = self.analyzer.analyze_sample(self.blank, sample_dark, sample_raw)
-        if show_plot:
-            self.plotter.show(self.plotter.plot_sample(sample))
-
-        if confirm("Export this sample? [Y/n] "):
-            self.exporter.export(sample)
-        return sample
+    def clear_blank(self) -> None:
+        self.blank = None
 
     @property
     def has_blank(self) -> bool:

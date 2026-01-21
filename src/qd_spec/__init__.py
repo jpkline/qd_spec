@@ -14,12 +14,24 @@
 
 """QD spectroscopy analysis library."""
 
-from .core import BlankMeasurement, QDAnalyzer, QDPlotter, QDSession, ResultExporter, SampleMeasurement, Spectrometer
+from .core import (
+    BlankAcquirer,
+    BlankMeasurement,
+    QDAnalyzer,
+    QDPlotter,
+    QDSession,
+    ResultExporter,
+    SampleAcquirer,
+    SampleMeasurement,
+    Spectrometer,
+)
 
 __all__ = [
     "QDSession",
     "BlankMeasurement",
     "SampleMeasurement",
+    "BlankAcquirer",
+    "SampleAcquirer",
     "QDAnalyzer",
     "QDPlotter",
     "Spectrometer",
