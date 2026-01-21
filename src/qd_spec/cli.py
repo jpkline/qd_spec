@@ -51,7 +51,7 @@ class MeasurementCLI:
         print(f"\nSession completed! Measured {samples_measured} samples with 1 blank.")
 
     def _acquire_blank(self, session: QDSession) -> None:
-        print("\nStep 1: Acquiring blank measurement...")
+        print("\nAcquiring blank measurement...")
 
         while True:
             acquirer = session.create_blank_acquirer(show_plot=True)
@@ -75,7 +75,7 @@ class MeasurementCLI:
         sample_count = 0
         while True:
             sample_number = sample_count + 1
-            print(f"\nStep 2: Acquiring sample #{sample_number}...")
+            print(f"\nAcquiring sample #{sample_number}...")
             acquirer = session.create_sample_acquirer(show_plot=True)
             try:
                 self._pause("Ready for sample dark? Press Enter to continue...")
