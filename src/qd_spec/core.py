@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+import pathlib
+import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Callable
@@ -26,6 +28,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.gridspec import GridSpec
+from pathvalidate import sanitize_filename
 from scipy.ndimage import gaussian_filter1d
 from stellarnet_driverLibs import stellarnet_driver3 as sn
 
@@ -37,7 +40,7 @@ class SpectrometerSettings:
     """Configuration applied to the Stellarnet spectrometer."""
 
     integration_time: int = 1000
-    scans_to_average: int = 1  # Increase after stabilizing firmware.
+    scans_to_average: int = 10
     smoothing: int = 0
     xtiming: int = 3
     channel: int = 0
@@ -199,6 +202,7 @@ class DoubleGaussianProfile(GaussianProfile):
 class SampleMeasurement:
     """Individual sample measurement."""
 
+    name: str
     wavelengths: np.ndarray
     sample_raw: np.ndarray
     sample_dark: np.ndarray
@@ -264,7 +268,7 @@ class QDPlotter:
             sample.sample_raw,
             sample.sample_dark,
             sample.sample_corrected,
-            ["Sample", "Dark", "Fitted Data"],
+            ["Sample", "Dark", f"Fit: {sample.name}"],
         )
         result = sample.sample_fit
         for i, color in enumerate([palette["comp1"], palette["comp2"]], start=1):
@@ -319,12 +323,14 @@ class QDAnalyzer:
 
     def analyze_sample(
         self,
+        name: str,
         sample_dark: np.ndarray,
         sample_raw: np.ndarray,
     ) -> SampleMeasurement:
         sample_corrected = sample_raw - sample_dark
         sample_fit = self.sample_profile.fit(self.wavelengths, sample_corrected)
         return SampleMeasurement(
+            name=name,
             wavelengths=self.wavelengths,
             sample_raw=sample_raw,
             sample_dark=sample_dark,
@@ -334,22 +340,56 @@ class QDAnalyzer:
 
 
 @dataclass
+class FullExporter(MeasurementExporter):
+    """Exports all measurement results."""
+
+    def __init__(self):
+        super().__init__()
+        self.result_exporter = ResultExporter()
+        self.data_exporter = DataExporter()
+
+    def export(self, sample: SampleMeasurement) -> None:
+        self.result_exporter.export(sample)
+        self.data_exporter.export(sample)
+
+
+@dataclass
 class ResultExporter(MeasurementExporter):
     """Export measurement results to CSV."""
 
-    path: str = "temp_results.csv"
+    path: str = "fit_results.csv"
 
     def export(self, sample: SampleMeasurement) -> None:
         result = sample.sample_fit
-        new_data = pd.DataFrame({k: v.value for k, v in result.params.items()}, index=[0])
+        new_data = pd.DataFrame({k: v.value for k, v in result.params.items()}, index=[sample.name])
 
         try:
-            df = pd.read_csv(self.path)
-            df = pd.concat([df, new_data], ignore_index=True)
+            df = pd.read_csv(self.path, index_col=0)
+            df = pd.concat([df, new_data])
         except (FileNotFoundError, pd.errors.EmptyDataError):
             df = new_data
 
-        df.to_csv(self.path, index=False)
+        df.to_csv(self.path, index=True)
+
+
+@dataclass
+class DataExporter(MeasurementExporter):
+    """Export measurement results to CSV."""
+
+    folder: str = "data"
+
+    def export(self, sample: SampleMeasurement) -> None:
+        base = pathlib.Path(self.folder)
+        base.mkdir(parents=True, exist_ok=True)
+
+        sample_uid = uuid.uuid4().hex
+        sample_path = base / sanitize_filename(f"{sample.name}_{sample_uid}_sample.csv")
+        dark_path = base / sanitize_filename(f"{sample.name}_{sample_uid}_dark.csv")
+
+        pd.DataFrame({"Wavelength": sample.wavelengths, "intensity": sample.sample_raw}).to_csv(
+            sample_path, index=False
+        )
+        pd.DataFrame({"Wavelength": sample.wavelengths, "intensity": sample.sample_dark}).to_csv(dark_path, index=False)
 
 
 class SampleAcquirer:
@@ -362,6 +402,10 @@ class SampleAcquirer:
         self._sample_dark: np.ndarray | None = None
         self._sample_raw: np.ndarray | None = None
         self._measurement: SampleMeasurement | None = None
+        self._name: str | None = None
+
+    def set_name(self, name: str) -> None:
+        self._name = name
 
     def capture_dark(self) -> np.ndarray:
         self._sample_dark = self._spectrometer.acquire_spectrum()
@@ -383,8 +427,10 @@ class SampleAcquirer:
             raise ValueError("capture_dark() must be called before capture_sample().")
         if self._sample_raw is None:
             raise ValueError("capture_sample() must be called before finalizing.")
+        if self._name is None:
+            raise ValueError("set_name() must be called before finalizing.")
 
-        measurement = self._session.analyzer.analyze_sample(self._sample_dark, self._sample_raw)
+        measurement = self._session.analyzer.analyze_sample(self._name, self._sample_dark, self._sample_raw)
         if self._show_plot:
             self._session.plotter.show(self._session.plotter.plot_sample(measurement))
         self._measurement = measurement
@@ -397,7 +443,6 @@ class QDSession:
     def __init__(
         self,
         settings: SpectrometerSettings | None = None,
-        export_path: str = "temp_results.csv",
         exporter: MeasurementExporter | None = None,
         plotter: QDPlotter | None = None,
         analyzer: QDAnalyzer | None = None,
@@ -406,7 +451,7 @@ class QDSession:
         self.spectrometer: Spectrometer | None = None
         self.analyzer = analyzer or QDAnalyzer()
         self.plotter = plotter or QDPlotter()
-        self.exporter = exporter or ResultExporter(export_path)
+        self.exporter = exporter or FullExporter()
 
     def __enter__(self):
         self.spectrometer = Spectrometer(self.settings)

@@ -56,6 +56,7 @@ class MeasurementCLI:
             print(f"\nAcquiring sample #{sample_number}...")
             acquirer = session.create_sample_acquirer(show_plot=True)
             try:
+                acquirer.set_name(self._prompt("Enter sample name/ID: ").strip())
                 self._pause("Ready for sample dark? Press Enter to continue...")
                 acquirer.capture_dark()
                 self._pause("Ready for sample (QDs)? Press Enter to continue...")
@@ -67,7 +68,7 @@ class MeasurementCLI:
             if self._confirm("Export this sample? [Y/n] "):
                 session.export_sample(measurement)
 
-            print(f"Sample #{sample_number} completed!")
+            print(f"Sample {measurement.name} completed!")
             sample_count += 1
 
             if not self._confirm("\nMeasure another sample? [Y/n] "):

@@ -3,3 +3,7 @@ __pycache__
 *.egg-info
 /dist
 *.csv
+
+# Ignore data folders
+/data
+/src/data
