@@ -44,6 +44,9 @@ class SpectrometerSettings:
     use_external_trigger: bool = False
 
 
+PREFIT_SMOOTHING = 5
+
+
 @dataclass(frozen=True)
 class PlotTheme:
     """Declarative matplotlib theme so styling is centralized and testable."""
@@ -111,7 +114,7 @@ class Spectrometer:
     def __enter__(self):
         return self
 
-    def __exit__(self, *args):
+    def __exit__(self, *_args):
         self.close()
 
 
@@ -126,7 +129,6 @@ class GaussianProfile(ABC):
     def fit(self, x: np.ndarray, y: np.ndarray) -> lmfit.model.ModelResult:
         params = self._initial_params(x, y)
         result = self._model.fit(y, params, x=x)
-        print(result.fit_report())
         self._warn_on_bounds(result)
         return result
 
@@ -162,7 +164,7 @@ class SingleGaussianProfile(GaussianProfile):
         params = self._model.make_params(a=10, x0=700, dx=20, yOff=5)
         params["a"].set(min=0.01)
         params["dx"].set(min=10)
-        params["x0"].set(min=100, max=1200, value=x[gaussian_filter1d(y, sigma=5).argmax()])
+        params["x0"].set(min=100, max=1200, value=x[gaussian_filter1d(y, sigma=PREFIT_SMOOTHING).argmax()])
         return params
 
 
@@ -187,7 +189,7 @@ class DoubleGaussianProfile(GaussianProfile):
         params["x01"].set(min=100, max=1200)
         params["x02"].set(min=100, max=1200)
 
-        peak_est = x[gaussian_filter1d(y, sigma=5).argmax()]
+        peak_est = x[gaussian_filter1d(y, sigma=PREFIT_SMOOTHING).argmax()]
         params["x01"].set(value=peak_est + 50)
         params["x02"].set(value=peak_est - 50)
         return params
@@ -296,7 +298,6 @@ class QDPlotter:
             fitted_peak,
             linestyle="--",
             color=palette["comp1"],
-            label="peak",
             lw=1.5,
             alpha=0.7,
         )
@@ -338,7 +339,6 @@ class QDPlotter:
                 component,
                 linestyle="--",
                 color=color,
-                label=f"peak {i}",
                 lw=1.5,
                 alpha=0.7,
             )
@@ -358,7 +358,7 @@ class QDPlotter:
         return fig, axes
 
     def show(self, fig_axes):
-        fig, _ = fig_axes
+        fig, _axes = fig_axes
         fig.tight_layout(pad=1.0)
         fig.show()
 
@@ -421,6 +421,35 @@ class ResultExporter(MeasurementExporter):
             df = new_data
 
         df.to_csv(self.path, index=False)
+
+
+class BaseAcquirer(ABC):
+    vial_contents: str
+
+    def __init__(self, session: QDSession):
+        self.session = session
+        self.vial_spec: np.ndarray | None = None
+        self.blank_spec: np.ndarray | None = None
+
+    def capture_vial(self):
+        spec = self.session.spectrometer
+        if spec is None:
+            raise ValueError("Spectrometer not connected")
+        self.vial_spec = spec.acquire_spectrum()
+
+    def capture_blank(self):
+        spec = self.session.spectrometer
+        if spec is None:
+            raise ValueError("Spectrometer not connected")
+        self.blank_spec = spec.acquire_spectrum()
+
+
+class BlankAcquirer(BaseAcquirer):
+    vial_contents = "Toluene"
+
+
+class SampleAcquirer(BaseAcquirer):
+    vial_contents = "QDs"
 
 
 class QDSession:
