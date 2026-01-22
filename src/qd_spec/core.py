@@ -129,9 +129,17 @@ class GaussianProfile(ABC):
         self._model = lmfit.Model(evaluator)
         self._evaluator = evaluator
 
-    def fit(self, x: np.ndarray, y: np.ndarray) -> lmfit.model.ModelResult:
+    def fit(
+        self,
+        x: np.ndarray,
+        y: np.ndarray,
+        cb: Callable[[float], None] | None = None,
+        end: Callable[[], None] | None = None,
+    ) -> lmfit.model.ModelResult:
         params = self._initial_params(x, y)
-        result = self._model.fit(y, params, x=x)
+        result = self._model.fit(y, params, x=x, iter_cb=cb)
+        if end:
+            end()
         self._warn_on_bounds(result)
         return result
 
@@ -326,9 +334,11 @@ class QDAnalyzer:
         name: str,
         sample_dark: np.ndarray,
         sample_raw: np.ndarray,
+        cb: Callable[[float], None] | None = None,
+        end: Callable[[], None] | None = None,
     ) -> SampleMeasurement:
         sample_corrected = sample_raw - sample_dark
-        sample_fit = self.sample_profile.fit(self.wavelengths, sample_corrected)
+        sample_fit = self.sample_profile.fit(self.wavelengths, sample_corrected, cb=cb, end=end)
         return SampleMeasurement(
             name=name,
             wavelengths=self.wavelengths,
@@ -411,18 +421,22 @@ class SampleAcquirer:
         self._sample_dark = self._spectrometer.acquire_spectrum()
         return self._sample_dark
 
-    def capture_sample(self) -> SampleMeasurement:
+    def capture_sample(self) -> np.ndarray:
         if self._sample_dark is None:
             raise ValueError("capture_dark() must be called before capture_sample().")
         self._sample_raw = self._spectrometer.acquire_spectrum()
-        return self._finalize()
+        return self._sample_raw
 
     def export(self) -> None:
         if self._measurement is None:
             raise ValueError("capture_sample() must complete before exporting.")
         self._session.export_sample(self._measurement)
 
-    def _finalize(self) -> SampleMeasurement:
+    def analyze(
+        self,
+        cb: Callable[[float], None] | None = None,
+        end: Callable[[], None] | None = None,
+    ) -> SampleMeasurement:
         if self._sample_dark is None:
             raise ValueError("capture_dark() must be called before capture_sample().")
         if self._sample_raw is None:
@@ -430,7 +444,9 @@ class SampleAcquirer:
         if self._name is None:
             raise ValueError("set_name() must be called before finalizing.")
 
-        measurement = self._session.analyzer.analyze_sample(self._name, self._sample_dark, self._sample_raw)
+        measurement = self._session.analyzer.analyze_sample(
+            self._name, self._sample_dark, self._sample_raw, cb=cb, end=end
+        )
         if self._show_plot:
             self._session.plotter.show(self._session.plotter.plot_sample(measurement))
         self._measurement = measurement

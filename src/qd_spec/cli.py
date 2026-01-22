@@ -16,9 +16,37 @@
 
 from __future__ import annotations
 
+import threading
+import time
 from collections.abc import Callable
 
+from alive_progress import alive_bar
+
 from .core import QDSession
+
+
+def run_with_spinner(func, seconds_estimate, title):
+    done = threading.Event()
+    result = {}
+
+    def worker():
+        result["value"] = func()
+        done.set()
+
+    t = threading.Thread(target=worker)
+    t.start()
+
+    with alive_bar(total=0, manual=True, title=title) as bar:
+        t0 = time.perf_counter()
+        while 1:
+            if done.is_set():
+                bar(percent=1.0)
+                break
+            time.sleep(0.012)
+            bar(percent=(time.perf_counter() - t0) / seconds_estimate)
+
+    t.join()
+    return result["value"]
 
 
 class MeasurementCLI:
@@ -58,11 +86,29 @@ class MeasurementCLI:
             try:
                 acquirer.set_name(self._prompt("Enter sample name/ID: ").strip())
                 self._pause("Ready for sample dark? Press Enter to continue...")
-                acquirer.capture_dark()
+                run_with_spinner(
+                    acquirer.capture_dark,
+                    (session.settings.scans_to_average * session.settings.integration_time / 1000) + 0.5,
+                    "Reading Spectrometer",
+                )
                 self._pause("Ready for sample (QDs)? Press Enter to continue...")
-                measurement = acquirer.capture_sample()
+                run_with_spinner(
+                    acquirer.capture_sample,
+                    (session.settings.scans_to_average * session.settings.integration_time / 1000) + 0.5,
+                    "Reading Spectrometer",
+                )
             except KeyboardInterrupt:
                 print("\nSample measurement cancelled.")
+                break
+
+            try:
+                bar_handle = alive_bar(title="Fitting", unit=" iterations")
+                bar = bar_handle.__enter__()
+                measurement = acquirer.analyze(
+                    cb=lambda *a, **k: bar(), end=lambda: bar_handle.__exit__(None, None, None)
+                )
+            except KeyboardInterrupt:
+                print("\nSample analysis cancelled.")
                 break
 
             if self._confirm("Export this sample? [Y/n] "):

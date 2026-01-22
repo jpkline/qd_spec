@@ -5,6 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 classifiers = ["Programming Language :: Python :: 3", "Topic :: Terminals"]
 dependencies = [
+    "alive-progress~=3.3.0",
     "matplotlib-sixel-backend @ git+https://github.com/jpkline/matplotlib-sixel-backend.git#main",
     "matplotlib~=3.10.8",
     "pandas~=2.3.3",
