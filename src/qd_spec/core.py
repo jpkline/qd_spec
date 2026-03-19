@@ -387,7 +387,8 @@ class QDAnalyzer:
         if self.blank is None:
             raise ValueError("analyze_blank() must be called before analyze_sample()")
         sample_corrected = sample_raw - sample_dark
-        sample_fit = self.sample_profile.fit(self.wavelengths, sample_corrected, cb=cb, end=end)
+        sample_blank_adjusted = sample_corrected - self.blank.blank_corrected
+        sample_fit = self.sample_profile.fit(self.wavelengths, sample_blank_adjusted, cb=cb, end=end)
         return SampleMeasurement(
             name=name,
             sample_raw=sample_raw,
