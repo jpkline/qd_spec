@@ -166,7 +166,7 @@ def _single_gauss(x, a, x0, dx, yOff):
 
 
 class SingleGaussianProfile(GaussianProfile):
-    """Single-peak Gaussian profile."""
+    """Single-peak Gaussian profile for blank fitting."""
 
     def __init__(self):
         super().__init__("single_gaussian", _single_gauss)
@@ -207,19 +207,44 @@ class DoubleGaussianProfile(GaussianProfile):
 
 
 @dataclass
-class SampleMeasurement:
-    """Individual sample measurement."""
+class BlankMeasurement:
+    """Blank measurement that will be used for all samples in a session."""
 
     name: str
     wavelengths: np.ndarray
+    blank_raw: np.ndarray
+    blank_dark: np.ndarray
+    blank_fit: lmfit.model.ModelResult
+    model: GaussianProfile
+
+    @property
+    def blank_corrected(self) -> np.ndarray:
+        return self.blank_raw - self.blank_dark
+
+
+@dataclass
+class SampleMeasurement:
+    """Individual sample measurement using a shared blank."""
+
     sample_raw: np.ndarray
     sample_dark: np.ndarray
     sample_fit: lmfit.model.ModelResult
+    blank: BlankMeasurement
     model: GaussianProfile
 
     @property
     def sample_corrected(self) -> np.ndarray:
         return self.sample_raw - self.sample_dark
+
+    @property
+    def sample_blank_adjusted(self) -> np.ndarray:
+        """Sample with blank subtracted (zero offset)."""
+        blank_signal = self.blank.model.evaluate_from_result(self.blank.blank_fit, self.blank.wavelengths, yOff=0)
+        return self.sample_corrected - blank_signal
+
+    @property
+    def wavelengths(self) -> np.ndarray:
+        return self.blank.wavelengths
 
 
 class MeasurementExporter(ABC):
@@ -269,13 +294,47 @@ class QDPlotter:
 
         return fig, axes
 
+    def plot_blank(self, blank: BlankMeasurement):
+        palette = self.theme.palette
+        fig, axes = self._create_base_layout(
+            blank.wavelengths,
+            blank.blank_raw,
+            blank.blank_dark,
+            blank.blank_corrected,
+            ["Blank", "Dark", "Fitted Blank"],
+        )
+        result = blank.blank_fit
+        fitted_peak = blank.model.evaluate_from_result(result, blank.wavelengths)
+        axes[2].plot(
+            blank.wavelengths,
+            fitted_peak,
+            linestyle="--",
+            color=palette["comp1"],
+            lw=1.5,
+            alpha=0.7,
+        )
+        center = result.params["x0"].value
+        center_idx = (np.abs(blank.wavelengths - center)).argmin()
+        axes[2].vlines(
+            center,
+            result.params["yOff"].value,
+            fitted_peak[center_idx],
+            colors=palette["comp1"],
+            linestyles=":",
+            linewidths=1.2,
+            alpha=0.8,
+        )
+        axes[2].plot(blank.wavelengths, result.best_fit, color=palette["fit"], lw=5, alpha=0.15)
+        axes[2].plot(blank.wavelengths, result.best_fit, color=palette["fit"], label="fit", lw=2.5)
+        return fig, axes
+
     def plot_sample(self, sample: SampleMeasurement):
         palette = self.theme.palette
         fig, axes = self._create_base_layout(
             sample.wavelengths,
             sample.sample_raw,
             sample.sample_dark,
-            sample.sample_corrected,
+            sample.sample_blank_adjusted,
             ["Sample", "Dark", f"Fit: {sample.name}"],
         )
         result = sample.sample_fit
@@ -321,13 +380,22 @@ class QDAnalyzer:
 
     def __init__(
         self,
+        blank_profile: GaussianProfile | None = None,
         sample_profile: GaussianProfile | None = None,
     ):
-        self.wavelengths: np.ndarray | None = None
+        self.blank_profile = blank_profile or SingleGaussianProfile()
         self.sample_profile = sample_profile or DoubleGaussianProfile()
 
-    def set_xrange(self, wavelengths: np.ndarray) -> None:
-        self.wavelengths = wavelengths
+    def analyze_blank(self, wavelengths: np.ndarray, blank_dark: np.ndarray, blank_raw: np.ndarray) -> BlankMeasurement:
+        blank_corrected = blank_raw - blank_dark
+        blank_fit = self.blank_profile.fit(wavelengths, blank_corrected)
+        return BlankMeasurement(
+            wavelengths=wavelengths,
+            blank_raw=blank_raw,
+            blank_dark=blank_dark,
+            blank_fit=blank_fit,
+            model=self.blank_profile,
+        )
 
     def analyze_sample(
         self,
@@ -345,6 +413,7 @@ class QDAnalyzer:
             sample_raw=sample_raw,
             sample_dark=sample_dark,
             sample_fit=sample_fit,
+            blank=blank,
             model=self.sample_profile,
         )
 
@@ -454,7 +523,7 @@ class SampleAcquirer:
 
 
 class QDSession:
-    """Session manager for QD measurements."""
+    """Session manager for QD measurements with blank-first workflow."""
 
     def __init__(
         self,
@@ -472,7 +541,6 @@ class QDSession:
     def __enter__(self):
         self.spectrometer = Spectrometer(self.settings)
         self.spectrometer.__enter__()
-        self.analyzer.set_xrange(self.spectrometer.acquire_wavelengths())
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -480,12 +548,28 @@ class QDSession:
             self.spectrometer.__exit__(exc_type, exc_val, exc_tb)
             self.spectrometer = None
 
+    def create_blank_acquirer(self, *, show_plot: bool = True) -> BlankAcquirer:
+        """Return a blank acquirer so the CLI can interleave prompts between captures."""
+
+        return BlankAcquirer(self, show_plot=show_plot)
+
     def create_sample_acquirer(self, *, show_plot: bool = True) -> SampleAcquirer:
-        """Return a sample acquirer."""
+        """Return a sample acquirer that reuses the session's validated blank."""
+
+        if self.blank is None:
+            raise ValueError("No blank available - acquire a blank before measuring samples.")
         return SampleAcquirer(self, show_plot=show_plot)
 
     def export_sample(self, sample: SampleMeasurement) -> None:
         self.exporter.export(sample)
+
+    def clear_blank(self) -> None:
+        self.blank = None
+
+    @property
+    def has_blank(self) -> bool:
+        """Check if session has a validated blank."""
+        return self.blank is not None
 
     @property
     def is_active(self) -> bool:
