@@ -471,6 +471,38 @@ class DataExporter(MeasurementExporter):
         pd.DataFrame({"Wavelength": sample.wavelengths, "intensity": sample.sample_dark}).to_csv(dark_path, index=False)
 
 
+class BlankAcquirer:
+    """Explicit two-step blank acquisition orchestrated by the CLI."""
+
+    def __init__(self, session: QDSession, show_plot: bool = True):
+        self._session = session
+        self._spectrometer = session._require_active_spectrometer()
+        self._show_plot = show_plot
+        self._wavelengths = self._spectrometer.acquire_wavelengths()
+        self._blank_dark: np.ndarray | None = None
+        self._blank_raw: np.ndarray | None = None
+
+    def capture_dark(self) -> np.ndarray:
+        self._blank_dark = self._spectrometer.acquire_spectrum()
+        return self._blank_dark
+
+    def capture_blank(self) -> BlankMeasurement:
+        self._blank_raw = self._spectrometer.acquire_spectrum()
+        return self._finalize()
+
+    def _finalize(self) -> BlankMeasurement:
+        if self._blank_dark is None:
+            raise ValueError("capture_dark() must be called before capture_blank().")
+        if self._blank_raw is None:
+            raise ValueError("capture_blank() must be called before finalizing.")
+
+        measurement = self._session.analyzer.analyze_blank(self._wavelengths, self._blank_dark, self._blank_raw)
+        if self._show_plot:
+            self._session.plotter.show(self._session.plotter.plot_blank(measurement))
+        self._session.blank = measurement
+        return measurement
+
+
 class SampleAcquirer:
     """Sample acquisition."""
 
