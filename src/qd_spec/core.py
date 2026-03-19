@@ -214,8 +214,6 @@ class BlankMeasurement:
     wavelengths: np.ndarray
     blank_raw: np.ndarray
     blank_dark: np.ndarray
-    blank_fit: lmfit.model.ModelResult
-    model: GaussianProfile
 
     @property
     def blank_corrected(self) -> np.ndarray:
@@ -226,6 +224,7 @@ class BlankMeasurement:
 class SampleMeasurement:
     """Individual sample measurement using a shared blank."""
 
+    name: str
     sample_raw: np.ndarray
     sample_dark: np.ndarray
     sample_fit: lmfit.model.ModelResult
@@ -239,8 +238,7 @@ class SampleMeasurement:
     @property
     def sample_blank_adjusted(self) -> np.ndarray:
         """Sample with blank subtracted (zero offset)."""
-        blank_signal = self.blank.model.evaluate_from_result(self.blank.blank_fit, self.blank.wavelengths, yOff=0)
-        return self.sample_corrected - blank_signal
+        return self.sample_corrected - self.blank.blank_corrected
 
     @property
     def wavelengths(self) -> np.ndarray:
@@ -295,37 +293,13 @@ class QDPlotter:
         return fig, axes
 
     def plot_blank(self, blank: BlankMeasurement):
-        palette = self.theme.palette
         fig, axes = self._create_base_layout(
             blank.wavelengths,
             blank.blank_raw,
             blank.blank_dark,
             blank.blank_corrected,
-            ["Blank", "Dark", "Fitted Blank"],
+            ["Blank", "Dark", "Blank Corrected"],
         )
-        result = blank.blank_fit
-        fitted_peak = blank.model.evaluate_from_result(result, blank.wavelengths)
-        axes[2].plot(
-            blank.wavelengths,
-            fitted_peak,
-            linestyle="--",
-            color=palette["comp1"],
-            lw=1.5,
-            alpha=0.7,
-        )
-        center = result.params["x0"].value
-        center_idx = (np.abs(blank.wavelengths - center)).argmin()
-        axes[2].vlines(
-            center,
-            result.params["yOff"].value,
-            fitted_peak[center_idx],
-            colors=palette["comp1"],
-            linestyles=":",
-            linewidths=1.2,
-            alpha=0.8,
-        )
-        axes[2].plot(blank.wavelengths, result.best_fit, color=palette["fit"], lw=5, alpha=0.15)
-        axes[2].plot(blank.wavelengths, result.best_fit, color=palette["fit"], label="fit", lw=2.5)
         return fig, axes
 
     def plot_sample(self, sample: SampleMeasurement):
@@ -383,7 +357,6 @@ class QDAnalyzer:
         blank_profile: GaussianProfile | None = None,
         sample_profile: GaussianProfile | None = None,
     ):
-        self.blank_profile = blank_profile or SingleGaussianProfile()
         self.sample_profile = sample_profile or DoubleGaussianProfile()
         self.wavelengths: np.ndarray | None = None
         self.blank: BlankMeasurement | None = None
@@ -392,15 +365,11 @@ class QDAnalyzer:
         self, name: str, wavelengths: np.ndarray, blank_dark: np.ndarray, blank_raw: np.ndarray
     ) -> BlankMeasurement:
         self.wavelengths = wavelengths
-        blank_corrected = blank_raw - blank_dark
-        blank_fit = self.blank_profile.fit(wavelengths, blank_corrected)
         measurement = BlankMeasurement(
             name=name,
             wavelengths=wavelengths,
             blank_raw=blank_raw,
             blank_dark=blank_dark,
-            blank_fit=blank_fit,
-            model=self.blank_profile,
         )
         self.blank = measurement
         return measurement
