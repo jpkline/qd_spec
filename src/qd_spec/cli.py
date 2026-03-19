@@ -85,9 +85,17 @@ class MeasurementCLI:
             acquirer = session.create_blank_acquirer(show_plot=True)
             try:
                 self._pause("Ready for blank dark? Press Enter to continue...")
-                acquirer.capture_dark()
+                run_with_spinner(
+                    acquirer.capture_dark,
+                    (session.settings.scans_to_average * session.settings.integration_time / 1000) + 0.5,
+                    "Reading Spectrometer",
+                )
                 self._pause("Ready for blank (Toluene)? Press Enter to continue...")
-                acquirer.capture_blank()
+                run_with_spinner(
+                    acquirer.capture_blank,
+                    (session.settings.scans_to_average * session.settings.integration_time / 1000) + 0.5,
+                    "Reading Spectrometer",
+                )
             except KeyboardInterrupt:
                 print("\nBlank acquisition cancelled.")
                 raise
