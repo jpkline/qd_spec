@@ -346,7 +346,8 @@ class QDPlotter:
     def show(self, fig_axes):
         fig, _axes = fig_axes
         fig.tight_layout(pad=1.0)
-        fig.show()
+        plt.draw()
+        plt.show()
 
 
 class QDAnalyzer:
