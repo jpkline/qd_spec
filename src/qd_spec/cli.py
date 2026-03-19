@@ -96,6 +96,7 @@ class MeasurementCLI:
                     (session.settings.scans_to_average * session.settings.integration_time / 1000) + 0.5,
                     "Reading Spectrometer",
                 )
+                acquirer.analyze()
             except KeyboardInterrupt:
                 print("\nBlank acquisition cancelled.")
                 raise

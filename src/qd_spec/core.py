@@ -298,7 +298,7 @@ class QDPlotter:
             blank.blank_raw,
             blank.blank_dark,
             blank.blank_corrected,
-            ["Blank", "Dark", "Blank Corrected"],
+            ["Blank", "Dark", "Corrected Blank"],
         )
         return fig, axes
 
@@ -463,20 +463,21 @@ class BlankAcquirer:
         self._wavelengths = self._spectrometer.acquire_wavelengths()
         self._blank_dark: np.ndarray | None = None
         self._blank_raw: np.ndarray | None = None
+        self._measurement: BlankMeasurement | None = None
 
     def capture_dark(self) -> np.ndarray:
         self._blank_dark = self._spectrometer.acquire_spectrum()
         return self._blank_dark
 
-    def capture_blank(self) -> BlankMeasurement:
+    def capture_blank(self) -> np.ndarray:
         self._blank_raw = self._spectrometer.acquire_spectrum()
-        return self._finalize()
+        return self._blank_raw
 
-    def _finalize(self) -> BlankMeasurement:
+    def analyze(self) -> BlankMeasurement:
         if self._blank_dark is None:
-            raise ValueError("capture_dark() must be called before capture_blank().")
+            raise ValueError("capture_dark() must be called before analyze().")
         if self._blank_raw is None:
-            raise ValueError("capture_blank() must be called before finalizing.")
+            raise ValueError("capture_blank() must be called before analyze().")
 
         measurement = self._session.analyzer.analyze_blank(
             "blank", self._wavelengths, self._blank_dark, self._blank_raw
@@ -484,6 +485,7 @@ class BlankAcquirer:
         if self._show_plot:
             self._session.plotter.show(self._session.plotter.plot_blank(measurement))
         self._session.blank = measurement
+        self._measurement = measurement
         return measurement
 
 
