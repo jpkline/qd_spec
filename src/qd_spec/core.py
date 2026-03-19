@@ -388,7 +388,9 @@ class QDAnalyzer:
         self.wavelengths: np.ndarray | None = None
         self.blank: BlankMeasurement | None = None
 
-    def analyze_blank(self, name: str, wavelengths: np.ndarray, blank_dark: np.ndarray, blank_raw: np.ndarray) -> BlankMeasurement:
+    def analyze_blank(
+        self, name: str, wavelengths: np.ndarray, blank_dark: np.ndarray, blank_raw: np.ndarray
+    ) -> BlankMeasurement:
         self.wavelengths = wavelengths
         blank_corrected = blank_raw - blank_dark
         blank_fit = self.blank_profile.fit(wavelengths, blank_corrected)
@@ -505,7 +507,9 @@ class BlankAcquirer:
         if self._blank_raw is None:
             raise ValueError("capture_blank() must be called before finalizing.")
 
-        measurement = self._session.analyzer.analyze_blank("blank", self._wavelengths, self._blank_dark, self._blank_raw)
+        measurement = self._session.analyzer.analyze_blank(
+            "blank", self._wavelengths, self._blank_dark, self._blank_raw
+        )
         if self._show_plot:
             self._session.plotter.show(self._session.plotter.plot_blank(measurement))
         self._session.blank = measurement
