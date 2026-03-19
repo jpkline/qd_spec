@@ -385,17 +385,23 @@ class QDAnalyzer:
     ):
         self.blank_profile = blank_profile or SingleGaussianProfile()
         self.sample_profile = sample_profile or DoubleGaussianProfile()
+        self.wavelengths: np.ndarray | None = None
+        self.blank: BlankMeasurement | None = None
 
-    def analyze_blank(self, wavelengths: np.ndarray, blank_dark: np.ndarray, blank_raw: np.ndarray) -> BlankMeasurement:
+    def analyze_blank(self, name: str, wavelengths: np.ndarray, blank_dark: np.ndarray, blank_raw: np.ndarray) -> BlankMeasurement:
+        self.wavelengths = wavelengths
         blank_corrected = blank_raw - blank_dark
         blank_fit = self.blank_profile.fit(wavelengths, blank_corrected)
-        return BlankMeasurement(
+        measurement = BlankMeasurement(
+            name=name,
             wavelengths=wavelengths,
             blank_raw=blank_raw,
             blank_dark=blank_dark,
             blank_fit=blank_fit,
             model=self.blank_profile,
         )
+        self.blank = measurement
+        return measurement
 
     def analyze_sample(
         self,
@@ -405,15 +411,18 @@ class QDAnalyzer:
         cb: Callable[[float], None] | None = None,
         end: Callable[[], None] | None = None,
     ) -> SampleMeasurement:
+        if self.wavelengths is None:
+            raise ValueError("analyze_blank() must be called before analyze_sample()")
+        if self.blank is None:
+            raise ValueError("analyze_blank() must be called before analyze_sample()")
         sample_corrected = sample_raw - sample_dark
         sample_fit = self.sample_profile.fit(self.wavelengths, sample_corrected, cb=cb, end=end)
         return SampleMeasurement(
             name=name,
-            wavelengths=self.wavelengths,
             sample_raw=sample_raw,
             sample_dark=sample_dark,
             sample_fit=sample_fit,
-            blank=blank,
+            blank=self.blank,
             model=self.sample_profile,
         )
 
@@ -496,7 +505,7 @@ class BlankAcquirer:
         if self._blank_raw is None:
             raise ValueError("capture_blank() must be called before finalizing.")
 
-        measurement = self._session.analyzer.analyze_blank(self._wavelengths, self._blank_dark, self._blank_raw)
+        measurement = self._session.analyzer.analyze_blank("blank", self._wavelengths, self._blank_dark, self._blank_raw)
         if self._show_plot:
             self._session.plotter.show(self._session.plotter.plot_blank(measurement))
         self._session.blank = measurement
@@ -569,6 +578,7 @@ class QDSession:
         self.analyzer = analyzer or QDAnalyzer()
         self.plotter = plotter or QDPlotter()
         self.exporter = exporter or FullExporter()
+        self.blank: BlankMeasurement | None = None
 
     def __enter__(self):
         self.spectrometer = Spectrometer(self.settings)
