@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+import datetime
+import os
 import pathlib
 import uuid
 from abc import ABC, abstractmethod
@@ -400,57 +402,73 @@ class QDAnalyzer:
         )
 
 
-@dataclass
-class FullExporter(MeasurementExporter):
-    """Exports all measurement results."""
+class RunExporter(MeasurementExporter):
+    """Exports measurement results and data into a run-specific sub-directory."""
 
-    def __init__(self):
-        super().__init__()
-        self.result_exporter = ResultExporter()
-        self.data_exporter = DataExporter()
+    def __init__(self, base_dir: pathlib.Path | str | None = None):
+        if base_dir is None:
+            env_dir = os.environ.get("QD_SPEC_DATA_DIR")
+            if env_dir:
+                self.base_dir = pathlib.Path(env_dir)
+            else:
+                self.base_dir = pathlib.Path.home() / ".qd_spec"
+        else:
+            self.base_dir = pathlib.Path(base_dir)
 
-    def export(self, sample: SampleMeasurement) -> None:
-        self.result_exporter.export(sample)
-        self.data_exporter.export(sample)
+        self.base_dir.mkdir(parents=True, exist_ok=True)
 
-
-@dataclass
-class ResultExporter(MeasurementExporter):
-    """Export measurement results to CSV."""
-
-    path: str = "fit_results.csv"
-
-    def export(self, sample: SampleMeasurement) -> None:
-        result = sample.sample_fit
-        new_data = pd.DataFrame({k: v.value for k, v in result.params.items()}, index=[sample.name])
-
-        try:
-            df = pd.read_csv(self.path, index_col=0)
-            df = pd.concat([df, new_data])
-        except (FileNotFoundError, pd.errors.EmptyDataError):
-            df = new_data
-
-        df.to_csv(self.path, index=True)
-
-
-@dataclass
-class DataExporter(MeasurementExporter):
-    """Export measurement results to CSV."""
-
-    folder: str = "data"
+        run_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.run_dir = self.base_dir / f"run_{run_id}"
+        self.results_path = self.base_dir / "fit_results.csv"  # Always append to main results file
+        self._exported_blank = False
 
     def export(self, sample: SampleMeasurement) -> None:
-        base = pathlib.Path(self.folder)
-        base.mkdir(parents=True, exist_ok=True)
+        self.run_dir.mkdir(parents=True, exist_ok=True)
 
-        sample_uid = uuid.uuid4().hex
-        sample_path = base / sanitize_filename(f"{sample.name}_{sample_uid}_sample.csv")
-        dark_path = base / sanitize_filename(f"{sample.name}_{sample_uid}_dark.csv")
+        # 1. Export Blank if not already done
+        if not self._exported_blank:
+            blank_name = sanitize_filename(f"{sample.blank.name}_blank")
+            blank_path = self.run_dir / f"{blank_name}.csv"
+            blank_dark_path = self.run_dir / f"{blank_name}_dark.csv"
+
+            pd.DataFrame({"Wavelength": sample.wavelengths, "intensity": sample.blank.blank_raw}).to_csv(
+                blank_path, index=False
+            )
+            pd.DataFrame({"Wavelength": sample.wavelengths, "intensity": sample.blank.blank_dark}).to_csv(
+                blank_dark_path, index=False
+            )
+            self._exported_blank = True
+
+        # 2. Export Sample Data
+        sample_uid = uuid.uuid4().hex[:8]
+        safe_name = sanitize_filename(sample.name)
+        sample_file_base = f"{safe_name}_{sample_uid}"
+
+        sample_path = self.run_dir / f"{sample_file_base}_sample.csv"
+        current_dark_path = self.run_dir / f"{sample_file_base}_dark.csv"
 
         pd.DataFrame({"Wavelength": sample.wavelengths, "intensity": sample.sample_raw}).to_csv(
             sample_path, index=False
         )
-        pd.DataFrame({"Wavelength": sample.wavelengths, "intensity": sample.sample_dark}).to_csv(dark_path, index=False)
+        pd.DataFrame({"Wavelength": sample.wavelengths, "intensity": sample.sample_dark}).to_csv(
+            current_dark_path, index=False
+        )
+
+        # 3. Export Sample Results
+        result = sample.sample_fit
+        # Improved fit_results structure with sample_uid for tracking
+        new_data = pd.DataFrame(
+            {"sample_uid": sample_uid, **{k: v.value for k, v in result.params.items()}}, index=[sample.name]
+        )
+        new_data.index.name = "sample_name"
+
+        try:
+            df = pd.read_csv(self.results_path, index_col=0)
+            df = pd.concat([df, new_data])
+        except (FileNotFoundError, pd.errors.EmptyDataError):
+            df = new_data
+
+        df.to_csv(self.results_path, index=True)
 
 
 class BlankAcquirer:
@@ -554,7 +572,7 @@ class QDSession:
         self.spectrometer: Spectrometer | None = None
         self.analyzer = analyzer or QDAnalyzer()
         self.plotter = plotter or QDPlotter()
-        self.exporter = exporter or FullExporter()
+        self.exporter = exporter or RunExporter()
         self.blank: BlankMeasurement | None = None
 
     def __enter__(self):

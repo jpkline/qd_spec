@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import pathlib
 import threading
 import time
 from collections.abc import Callable
@@ -154,13 +155,29 @@ class MeasurementCLI:
         return sample_count
 
 
-def run_cli() -> None:
-    MeasurementCLI().run()
+def run_cli(base_dir: str | pathlib.Path | None = None) -> None:
+    def session_factory():
+        from .core import RunExporter
+
+        return QDSession(exporter=RunExporter(base_dir=base_dir))
+
+    MeasurementCLI(session_factory=session_factory).run()
 
 
 def main() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="QD Spectroscopy Measurement Tool")
+    parser.add_argument(
+        "--data-dir",
+        type=pathlib.Path,
+        help="Base directory for data storage (defaults to QD_SPEC_DATA_DIR env var or ~/.qd_spec)",
+        default=None,
+    )
+    args = parser.parse_args()
+
     try:
-        run_cli()
+        run_cli(base_dir=args.data_dir)
     except KeyboardInterrupt:
         print("\nSession cancelled by user.")
     except Exception as exc:  # pragma: no cover - surfaced for operator visibility

@@ -20,7 +20,7 @@ from .core import (
     QDAnalyzer,
     QDPlotter,
     QDSession,
-    ResultExporter,
+    RunExporter,
     SampleAcquirer,
     SampleMeasurement,
     Spectrometer,
@@ -35,5 +35,5 @@ __all__ = [
     "QDAnalyzer",
     "QDPlotter",
     "Spectrometer",
-    "ResultExporter",
+    "RunExporter",
 ]
