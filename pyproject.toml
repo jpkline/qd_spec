@@ -5,6 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 classifiers = ["Programming Language :: Python :: 3", "Topic :: Terminals"]
 dependencies = [
+    "alive-progress>=3.3.0,<4",
     "matplotlib>=3.11.2,<3.12",
     "pandas>=3.0.6,<3.1",
     "scipy>=1.18.1,<1.19",

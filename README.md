@@ -64,9 +64,9 @@ The existing bounds remain: amplitudes >= 50, widths >= 15 nm, centers between
 100 and 1200 nm. Smoothing only estimates starting centers. Bound warnings can
 indicate that the data does not support the assumed peaks.
 
-Matplotlib chooses its usual backend. The sixel backend is a required dependency.
-For terminal sixel plots, set `MPLBACKEND` to
-`module://matplotlib-sixel-backend`.
+The CLI defaults to sixel when run. Set `MPLBACKEND` to override it.
+Importing the API or CLI does not change Matplotlib's backend.
+Acquisition uses the original `alive-progress` spinner from Git history.
 
 ## Files and checks
 

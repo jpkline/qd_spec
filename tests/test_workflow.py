@@ -1,5 +1,6 @@
 """Regression checks using synthetic spectra and a simulated vendor driver."""
 
+import importlib
 import os
 import tempfile
 import unittest
@@ -18,6 +19,30 @@ from qd_spec.cli import run_cli
 
 
 class WorkflowTests(unittest.TestCase):
+    def test_cli_backend_changes_only_when_run_and_honors_override(self):
+        from qd_spec import cli
+
+        with patch("matplotlib.use") as use:
+            importlib.reload(cli)
+            use.assert_not_called()
+            for override, expected in ((None, "module://matplotlib-sixel-backend"), ("Agg", "Agg")):
+                with (
+                    patch.dict(os.environ),
+                    patch("builtins.input", side_effect=KeyboardInterrupt),
+                    self.assertRaises(KeyboardInterrupt),
+                ):
+                    os.environ.pop("MPLBACKEND", None)
+                    if override:
+                        os.environ["MPLBACKEND"] = override
+                    cli.run_cli()
+                use.assert_called_with(expected)
+
+    def test_cli_spinner_propagates_read_failure_and_releases_device(self):
+        self.driver.getSpectrum_Y.side_effect = RuntimeError("read failed")
+        with patch("builtins.input", return_value=""), self.assertRaisesRegex(RuntimeError, "read failed"):
+            run_cli()
+        self.driver.reset.assert_called_once()
+
     def setUp(self):
         self.x = np.linspace(400, 800, 401)
         self.dark = np.full_like(self.x, 5)
