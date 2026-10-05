@@ -2,6 +2,7 @@ __pycache__
 /build
 *.egg-info
 /dist
+.venv/
 *.csv
 
 # Ignore data folders

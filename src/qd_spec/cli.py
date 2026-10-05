@@ -1,188 +1,81 @@
 # Copyright 2026 John Kline
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#   http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# SPDX-License-Identifier: Apache-2.0
 
-"""Command-line interface for QD spectroscopy measurements."""
+"""Interactive blank-first measurement workflow."""
 
-from __future__ import annotations
+import argparse
+import os
+from datetime import UTC, datetime
+from pathlib import Path
 
-import pathlib
-import threading
-import time
-from collections.abc import Callable
+import matplotlib.pyplot as plt
 
-from alive_progress import alive_bar
-
-from .core import QDSession
+from .core import Spectrometer, fit_spectrum, plot_spectrum, save_measurement
 
 
-def run_with_spinner(func, seconds_estimate, title):
-    done = threading.Event()
-    result = {}
-
-    def worker():
-        result["value"] = func()
-        done.set()
-
-    t = threading.Thread(target=worker)
-    t.start()
-
-    with alive_bar(total=0, manual=True, title=title) as bar:
-        t0 = time.perf_counter()
-        while 1:
-            if done.is_set():
-                bar(percent=1.0)
-                break
-            time.sleep(0.012)
-            bar(percent=(time.perf_counter() - t0) / seconds_estimate)
-
-    t.join()
-    return result["value"]
+def _confirm(message):
+    return input(f"{message} [Y/n] ").strip().casefold() not in {"n", "no"}
 
 
-class MeasurementCLI:
-    """Interactive CLI orchestrated with explicit object state."""
-
-    def __init__(self, session_factory: Callable[[], QDSession] = QDSession):
-        self._session_factory = session_factory
-
-    def run(self) -> None:
-        self._print_banner()
-        with self._session_factory() as session:
-            self._acquire_blank(session)
-            samples_measured = self._acquire_samples(session)
-        self._print_summary(samples_measured)
-
-    def _prompt(self, message: str) -> str:
-        return input(message)
-
-    def _pause(self, message: str) -> None:
-        self._prompt(message)
-
-    def _confirm(self, message: str) -> bool:
-        return self._prompt(message).strip().casefold() not in {"n", "no"}
-
-    def _print_banner(self) -> None:
-        print("QD Spectroscopy Measurement Tool")
-        print("=" * 35)
-
-    def _print_summary(self, samples_measured: int) -> None:
-        print(f"\nSession completed! Measured {samples_measured} samples with 1 blank.")
-
-    def _acquire_blank(self, session: QDSession) -> None:
-        print("\nAcquiring blank measurement...")
-
-        while True:
-            acquirer = session.create_blank_acquirer(show_plot=True)
-            try:
-                self._pause("Ready for blank dark? Press Enter to continue...")
-                run_with_spinner(
-                    acquirer.capture_dark,
-                    (session.settings.scans_to_average * session.settings.integration_time / 1000) + 0.5,
-                    "Reading Spectrometer",
-                )
-                self._pause("Ready for blank (Toluene)? Press Enter to continue...")
-                run_with_spinner(
-                    acquirer.capture_blank,
-                    (session.settings.scans_to_average * session.settings.integration_time / 1000) + 0.5,
-                    "Reading Spectrometer",
-                )
-                acquirer.analyze()
-            except KeyboardInterrupt:
-                print("\nBlank acquisition cancelled.")
-                raise
-
-            if self._confirm("Accept this blank for the session? [Y/n] "):
-                print("Blank accepted and ready for measurements!")
-                return
-
-            session.clear_blank()
-            print("Blank rejected. Repeating acquisition...")
-
-    def _acquire_samples(self, session: QDSession) -> int:
-        sample_count = 0
-        while True:
-            sample_number = sample_count + 1
-            print(f"\nAcquiring sample #{sample_number}...")
-            acquirer = session.create_sample_acquirer(show_plot=True)
-            try:
-                acquirer.set_name(self._prompt("Enter sample name/ID: ").strip())
-                self._pause("Ready for sample dark? Press Enter to continue...")
-                run_with_spinner(
-                    acquirer.capture_dark,
-                    (session.settings.scans_to_average * session.settings.integration_time / 1000) + 0.5,
-                    "Reading Spectrometer",
-                )
-                self._pause("Ready for sample (QDs)? Press Enter to continue...")
-                run_with_spinner(
-                    acquirer.capture_sample,
-                    (session.settings.scans_to_average * session.settings.integration_time / 1000) + 0.5,
-                    "Reading Spectrometer",
-                )
-            except KeyboardInterrupt:
-                print("\nSample measurement cancelled.")
-                break
-
-            try:
-                bar_handle = alive_bar(title="Fitting", unit=" iterations")
-                bar = bar_handle.__enter__()
-                measurement = acquirer.analyze(
-                    cb=lambda *a, **k: bar(), end=lambda: bar_handle.__exit__(None, None, None)
-                )
-            except KeyboardInterrupt:
-                print("\nSample analysis cancelled.")
-                break
-
-            if self._confirm("Export this sample? [Y/n] "):
-                session.export_sample(measurement)
-
-            print(f"Sample {measurement.name} completed!")
-            sample_count += 1
-
-            if not self._confirm("\nMeasure another sample with the same blank? [Y/n] "):
-                break
-
-        return sample_count
+def _capture(spec, label):
+    input(f"Ready for {label}? Press Enter to continue...")
+    print("Reading spectrometer...", flush=True)
+    return spec.read()
 
 
-def run_cli(base_dir: str | pathlib.Path | None = None) -> None:
-    def session_factory():
-        from .core import RunExporter
-
-        return QDSession(exporter=RunExporter(base_dir=base_dir))
-
-    MeasurementCLI(session_factory=session_factory).run()
-
-
-def main() -> None:
-    import argparse
-
-    parser = argparse.ArgumentParser(description="QD Spectroscopy Measurement Tool")
-    parser.add_argument(
-        "--data-dir",
-        type=pathlib.Path,
-        help="Base directory for data storage (defaults to QD_SPEC_DATA_DIR env var or ~/.qd_spec)",
-        default=None,
-    )
-    args = parser.parse_args()
-
+def _show(figure):
     try:
-        run_cli(base_dir=args.data_dir)
+        plt.show()
+    finally:
+        plt.close(figure)
+
+
+def run_cli(base_dir=None, *, integration_time=1000, scans_to_average=10):
+    """Acquire one accepted blank, then fit and optionally save each sample."""
+    base_dir = Path(base_dir or os.environ.get("QD_SPEC_DATA_DIR") or Path.home() / ".qd_spec")
+    run_dir = base_dir / datetime.now(UTC).astimezone().strftime("run_%Y%m%d_%H%M%S_%f")
+    count = 0
+    blank_saved = False
+    print("QD Spectroscopy Measurement Tool")
+    with Spectrometer(integration_time=integration_time, scans_to_average=scans_to_average) as spec:
+        wavelengths = spec.wavelengths
+        while True:
+            blank_dark = _capture(spec, "blank dark")
+            blank_raw = _capture(spec, "blank (Toluene)")
+            _show(plot_spectrum(wavelengths, blank_raw, blank_dark, name="Blank"))
+            if _confirm("Accept this blank for the session?"):
+                break
+        blank = blank_raw - blank_dark
+
+        while True:
+            name = input("Enter sample name/ID: ").strip()
+            dark = _capture(spec, "sample dark")
+            raw = _capture(spec, "sample (QDs)")
+            print("Fitting spectrum...", flush=True)
+            fit = fit_spectrum(wavelengths, raw - dark - blank)
+            _show(plot_spectrum(wavelengths, raw, dark, blank=blank, fit=fit, name=name))
+            if _confirm("Export this sample?"):
+                if not blank_saved:
+                    save_measurement(run_dir, "blank", wavelengths, blank_raw, blank_dark)
+                    blank_saved = True
+                path = save_measurement(run_dir, name, wavelengths, raw, dark, fit=fit)
+                print(f"Saved {path}")
+            count += 1
+            if not _confirm("Measure another sample with the same blank?"):
+                break
+    print(f"Session completed: {count} sample(s), 1 blank.")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="QD Spectroscopy Measurement Tool")
+    parser.add_argument("--data-dir", type=Path, help="Output directory (default: QD_SPEC_DATA_DIR or ~/.qd_spec)")
+    parser.add_argument("--integration-time", type=int, default=1000, help="Exposure in milliseconds (default: 1000)")
+    parser.add_argument("--scans", type=int, default=10, help="Scans to average (default: 10)")
+    args = parser.parse_args()
+    try:
+        run_cli(args.data_dir, integration_time=args.integration_time, scans_to_average=args.scans)
     except KeyboardInterrupt:
-        print("\nSession cancelled by user.")
-    except Exception as exc:  # pragma: no cover - surfaced for operator visibility
-        print(f"Error during measurement: {exc}")
-        raise
+        print("\nSession cancelled.")
 
 
 if __name__ == "__main__":

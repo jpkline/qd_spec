@@ -1,120 +1,60 @@
 # Copyright 2026 John Kline
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#   http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# SPDX-License-Identifier: Apache-2.0
 
-"""QD spectroscopy library: acquisition, fitting, plotting, and data export."""
+"""Spectrometer access, two-Gaussian fitting, plotting, and CSV export."""
 
-from __future__ import annotations
-
-import datetime
-import os
-import pathlib
 import uuid
-from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from typing import Callable
+from pathlib import Path
 
 import lmfit
-import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from matplotlib.gridspec import GridSpec
 from pathvalidate import sanitize_filename
 from scipy.ndimage import gaussian_filter1d
-from stellarnet_driverLibs import stellarnet_driver3 as sn
-
-matplotlib.use("module://matplotlib-sixel-backend")
-
-
-@dataclass(frozen=True)
-class SpectrometerSettings:
-    """Configuration applied to the Stellarnet spectrometer."""
-
-    integration_time: int = 1000
-    scans_to_average: int = 10
-    smoothing: int = 0
-    xtiming: int = 3
-    channel: int = 0
-    use_external_trigger: bool = False
-
-
-PREFIT_SMOOTHING = 5
-
-
-@dataclass(frozen=True)
-class PlotTheme:
-    """Declarative matplotlib theme so styling is centralized and testable."""
-
-    foreground: str = "#F2F2F2"
-    background: str = "#0C0C0C"
-    palette: dict[str, str] = field(
-        default_factory=lambda: {
-            "data": "#5DA9E9",
-            "fit": "#E6AF2E",
-            "comp1": "#C97C5D",
-            "comp2": "#C6A0CF",
-            "baseline": "#888888",
-        }
-    )
-
-    def apply(self) -> None:
-        plt.style.use("dark_background")
-        plt.rcParams.update(
-            {
-                "figure.facecolor": self.background,
-                "axes.facecolor": self.background,
-                "savefig.facecolor": self.background,
-                "text.color": self.foreground,
-                "axes.labelcolor": self.foreground,
-                "axes.titlecolor": self.foreground,
-                "xtick.color": self.foreground,
-                "ytick.color": self.foreground,
-                "axes.edgecolor": self.foreground,
-                "lines.dash_capstyle": "round",
-                "lines.solid_capstyle": "round",
-            }
-        )
-
-
-THEME = PlotTheme()
-THEME.apply()
 
 
 class Spectrometer:
-    """Hardware interface for spectrometer acquisition."""
+    """Open a Stellarnet device; use a with-block to release it reliably.
 
-    def __init__(self, settings: SpectrometerSettings | None = None):
-        self.settings = settings or SpectrometerSettings()
-        self._spec = sn.array_get_spec_only(self.settings.channel)
-        sn.ext_trig(self._spec, self.settings.use_external_trigger)
-        sn.setParam(
-            self._spec,
-            self.settings.integration_time,
-            self.settings.scans_to_average,
-            self.settings.smoothing,
-            self.settings.xtiming,
-            clear=True,
-        )
+    Integration time is in milliseconds. Each read returns the average of
+    ``scans_to_average`` scans on the device's fixed ``wavelengths`` grid (nm).
+    """
 
-    def acquire_spectrum(self) -> np.ndarray:
-        return sn.getSpectrum_Y(self._spec)
+    def __init__(
+        self,
+        *,
+        integration_time=1000,
+        scans_to_average=10,
+        smoothing=0,
+        xtiming=3,
+        channel=0,
+        use_external_trigger=False,
+    ):
+        # Keep the vendor dependency out of offline analysis.
+        from stellarnet_driverLibs import stellarnet_driver3
 
-    def acquire_wavelengths(self) -> np.ndarray:
-        return sn.getSpectrum_X(self._spec)
+        self._driver = stellarnet_driver3
+        self._device = self._driver.array_get_spec_only(channel)
+        try:
+            self._driver.ext_trig(self._device, use_external_trigger)
+            self._driver.setParam(self._device, integration_time, scans_to_average, smoothing, xtiming, clear=True)
+            self.wavelengths = np.asarray(self._driver.getSpectrum_X(self._device))
+        except BaseException:
+            self.close()
+            raise
+
+    def read(self) -> np.ndarray:
+        """Read one spectrum using the configured averaging and exposure."""
+        if self._device is None:
+            raise RuntimeError("Spectrometer is closed")
+        return np.asarray(self._driver.getSpectrum_Y(self._device))
 
     def close(self) -> None:
-        sn.reset(self._spec)
+        """Release the device. Calling close more than once is harmless."""
+        if self._device is not None:
+            device, self._device = self._device, None
+            self._driver.reset(device)
 
     def __enter__(self):
         return self
@@ -123,497 +63,94 @@ class Spectrometer:
         self.close()
 
 
-class GaussianProfile(ABC):
-    """Base class for parameterized Gaussian models with lmfit integration."""
-
-    def __init__(self, name: str, evaluator: Callable[..., np.ndarray]):
-        self.name = name
-        self._model = lmfit.Model(evaluator)
-        self._evaluator = evaluator
-
-    def fit(
-        self,
-        x: np.ndarray,
-        y: np.ndarray,
-        cb: Callable[[float], None] | None = None,
-        end: Callable[[], None] | None = None,
-    ) -> lmfit.model.ModelResult:
-        params = self._initial_params(x, y)
-        result = self._model.fit(y, params, x=x, iter_cb=cb)
-        if end:
-            end()
-        self._warn_on_bounds(result)
-        return result
-
-    def evaluate(self, x: np.ndarray, **params) -> np.ndarray:
-        return self._evaluator(x, **params)
-
-    def evaluate_from_result(self, result: lmfit.model.ModelResult, x: np.ndarray, **overrides) -> np.ndarray:
-        params = {name: param.value for name, param in result.params.items()}
-        params.update(overrides)
-        return self.evaluate(x, **params)
-
-    def _warn_on_bounds(self, result: lmfit.model.ModelResult) -> None:
-        for name, info in result.params.items():
-            if np.isclose(info.value, info.min) or np.isclose(info.value, info.max):
-                print(f"WARNING: Parameter `{name}` hit bound: {info.value:.2f}")
-
-    @abstractmethod
-    def _initial_params(self, x: np.ndarray, y: np.ndarray) -> lmfit.Parameters:
-        """Return initial parameters tuned to the incoming spectrum."""
+def _gaussian(x, amplitude, center, width):
+    return amplitude * np.exp(-0.5 * ((x - center) / width) ** 2)
 
 
-def _single_gauss(x, a, x0, dx, yOff):
-    return a * np.exp(-((x - x0) ** 2) / (2 * dx**2)) + yOff
+def _double_gaussian(x, a1, x01, dx1, a2, x02, dx2, yOff):
+    # Parameter names are kept consistent with existing fit_results.csv files.
+    return _gaussian(x, a1, x01, dx1) + _gaussian(x, a2, x02, dx2) + yOff
 
 
-class SingleGaussianProfile(GaussianProfile):
-    """Single-peak Gaussian profile for blank fitting."""
+def fit_spectrum(wavelengths, intensity) -> lmfit.model.ModelResult:
+    """Fit two Gaussians and a constant baseline to a corrected spectrum.
 
-    def __init__(self):
-        super().__init__("single_gaussian", _single_gauss)
-
-    def _initial_params(self, x: np.ndarray, y: np.ndarray) -> lmfit.Parameters:
-        params = self._model.make_params(a=10, x0=700, dx=20, yOff=5)
-        params["a"].set(min=0.01)
-        params["dx"].set(min=10)
-        params["x0"].set(min=100, max=1200, value=x[gaussian_filter1d(y, sigma=PREFIT_SMOOTHING).argmax()])
-        return params
-
-
-def _double_gauss(x, a1, x01, dx1, a2, x02, dx2, yOff):
-    term1 = a1 * np.exp(-((x - x01) ** 2) / (2 * dx1**2))
-    term2 = a2 * np.exp(-((x - x02) ** 2) / (2 * dx2**2))
-    return term1 + term2 + yOff
-
-
-class DoubleGaussianProfile(GaussianProfile):
-    """Double-peak Gaussian profile for QD sample fitting."""
-
-    def __init__(self):
-        super().__init__("double_gaussian", _double_gauss)
-
-    def _initial_params(self, x: np.ndarray, y: np.ndarray) -> lmfit.Parameters:
-        params = self._model.make_params(a1=10, x01=500, dx1=20, a2=10, x02=600, dx2=20, yOff=10)
-        params["a1"].set(min=50)
-        params["a2"].set(min=50)
-        params["dx1"].set(min=15)
-        params["dx2"].set(min=15)
-        params["x01"].set(min=100, max=1200)
-        params["x02"].set(min=100, max=1200)
-
-        peak_est = x[gaussian_filter1d(y, sigma=PREFIT_SMOOTHING).argmax()]
-        params["x01"].set(value=peak_est + 50)
-        params["x02"].set(value=peak_est - 50)
-        return params
+    Pass ``(sample - sample_dark) - (blank - blank_dark)`` as intensity.
+    Amplitudes are peak heights; widths are standard deviations in nm.
+    Smoothing is only used to guess peak centers; the fit uses original data.
+    """
+    model = lmfit.Model(_double_gaussian)
+    params = model.make_params(a1=50, x01=500, dx1=20, a2=50, x02=600, dx2=20, yOff=10)
+    peak = wavelengths[gaussian_filter1d(intensity, sigma=5).argmax()]
+    for i, center in enumerate((peak + 50, peak - 50), start=1):
+        params[f"a{i}"].set(min=50)
+        params[f"dx{i}"].set(min=15)
+        params[f"x0{i}"].set(value=center, min=100, max=1200)
+    result = model.fit(intensity, params, x=wavelengths)
+    for name, param in result.params.items():
+        if np.isclose(param.value, param.min) or np.isclose(param.value, param.max):
+            print(f"WARNING: Parameter `{name}` hit bound: {param.value:.2f}")
+    return result
 
 
-@dataclass
-class BlankMeasurement:
-    """Blank measurement that will be used for all samples in a session."""
+def plot_spectrum(wavelengths, raw, dark, *, blank=None, fit=None, name="Spectrum"):
+    """Return a figure with raw, dark, and corrected spectra.
 
-    name: str
-    wavelengths: np.ndarray
-    blank_raw: np.ndarray
-    blank_dark: np.ndarray
-
-    @property
-    def blank_corrected(self) -> np.ndarray:
-        return self.blank_raw - self.blank_dark
-
-
-@dataclass
-class SampleMeasurement:
-    """Individual sample measurement using a shared blank."""
-
-    name: str
-    sample_raw: np.ndarray
-    sample_dark: np.ndarray
-    sample_fit: lmfit.model.ModelResult
-    blank: BlankMeasurement
-    model: GaussianProfile
-
-    @property
-    def sample_corrected(self) -> np.ndarray:
-        return self.sample_raw - self.sample_dark
-
-    @property
-    def sample_blank_adjusted(self) -> np.ndarray:
-        """Sample with blank subtracted (zero offset)."""
-        return self.sample_corrected - self.blank.blank_corrected
-
-    @property
-    def wavelengths(self) -> np.ndarray:
-        return self.blank.wavelengths
-
-
-class MeasurementExporter(ABC):
-    """Strategy interface for persisting measurement metadata."""
-
-    @abstractmethod
-    def export(self, sample: SampleMeasurement) -> None:
-        raise NotImplementedError
-
-
-class QDPlotter:
-    """Plotting interface for QD measurements."""
-
-    def __init__(self, theme: PlotTheme = THEME):
-        self.theme = theme
-
-    def _create_base_layout(
-        self,
-        wavelengths: np.ndarray,
-        raw_data: np.ndarray,
-        dark_data: np.ndarray,
-        processed_data: np.ndarray,
-        titles: list[str],
-    ):
-        palette = self.theme.palette
-        fig = plt.figure(figsize=(8, 7))
-        gs = GridSpec(2, 2, height_ratios=[2, 3])
-        axes = [fig.add_subplot(gs[0, 0]), fig.add_subplot(gs[0, 1]), fig.add_subplot(gs[1, :])]
-
-        for i, (ax, title, data, size) in enumerate(
-            zip(axes, titles, [raw_data, dark_data, processed_data], [4, 4, 8])
-        ):
-            ax.set_title(title)
-            ax.scatter(
-                wavelengths,
-                data,
-                s=size,
-                alpha=0.8 if i < 2 else 0.6,
-                color=palette["data"],
-                linewidths=0,
+    ``blank`` is an optional dark-corrected blank. ``fit`` is the result of
+    fit_spectrum. Display with plt.show() or save with figure.savefig(path).
+    """
+    corrected = raw - dark
+    if blank is not None:
+        corrected = corrected - blank
+    with plt.style.context("dark_background"):
+        fig, axes = plt.subplot_mosaic(
+            [["raw", "dark"], ["corrected", "corrected"]],
+            height_ratios=[2, 3],
+            figsize=(8, 7),
+            layout="constrained",
+        )
+        for ax, title, data in zip(axes.values(), (name, "Dark", "Corrected spectrum"), (raw, dark, corrected)):
+            ax.scatter(wavelengths, data, s=5, alpha=0.6, color="#5DA9E9", linewidths=0)
+            ax.set(
+                title=title, xlabel="Wavelength [nm]", ylabel="Intensity", xlim=(wavelengths.min(), wavelengths.max())
             )
-            ax.set_axisbelow(True)
-            ax.grid(True, alpha=0.15)
-            ax.set_xlabel("Wavelength [nm]")
-            ax.set_ylabel("Intensity")
-            ax.set_xlim(wavelengths.min(), wavelengths.max())
-
-        return fig, axes
-
-    def plot_blank(self, blank: BlankMeasurement):
-        fig, axes = self._create_base_layout(
-            blank.wavelengths,
-            blank.blank_raw,
-            blank.blank_dark,
-            blank.blank_corrected,
-            ["Blank", "Dark", "Corrected Blank"],
-        )
-        return fig, axes
-
-    def plot_sample(self, sample: SampleMeasurement):
-        palette = self.theme.palette
-        fig, axes = self._create_base_layout(
-            sample.wavelengths,
-            sample.sample_raw,
-            sample.sample_dark,
-            sample.sample_blank_adjusted,
-            ["Sample", "Dark", f"Fit: {sample.name}"],
-        )
-        result = sample.sample_fit
-        for i, color in enumerate([palette["comp1"], palette["comp2"]], start=1):
-            component = _single_gauss(
-                sample.wavelengths,
-                a=result.params[f"a{i}"].value,
-                x0=result.params[f"x0{i}"].value,
-                dx=result.params[f"dx{i}"].value,
-                yOff=result.params["yOff"].value,
-            )
-            axes[2].plot(
-                sample.wavelengths,
-                component,
-                linestyle="--",
-                color=color,
-                lw=1.5,
-                alpha=0.7,
-            )
-            center_idx = (np.abs(sample.wavelengths - result.params[f"x0{i}"].value)).argmin()
-            axes[2].vlines(
-                result.params[f"x0{i}"].value,
-                result.params["yOff"].value,
-                component[center_idx],
-                colors=color,
-                linestyles=":",
-                linewidths=1.2,
-                alpha=0.8,
-            )
-
-        axes[2].plot(sample.wavelengths, result.best_fit, color=palette["fit"], lw=5, alpha=0.15)
-        axes[2].plot(sample.wavelengths, result.best_fit, color=palette["fit"], label="fit", lw=2.5)
-        return fig, axes
-
-    def show(self, fig_axes):
-        fig, _axes = fig_axes
-        fig.tight_layout(pad=1.0)
-        plt.draw()
-        plt.show()
+            ax.grid(alpha=0.15)
+        if fit is not None:
+            ax = axes["corrected"]
+            params = fit.best_values
+            for i, color in enumerate(("#C97C5D", "#C6A0CF"), start=1):
+                component = _gaussian(wavelengths, params[f"a{i}"], params[f"x0{i}"], params[f"dx{i}"])
+                ax.plot(wavelengths, component + params["yOff"], "--", color=color, label=f"Peak {i}")
+            ax.plot(wavelengths, fit.best_fit, color="#E6AF2E", label="Fit")
+            ax.legend()
+    return fig
 
 
-class QDAnalyzer:
-    """Core analysis engine for QD measurements."""
+def save_measurement(run_dir, name, wavelengths, raw, dark, *, fit=None) -> Path:
+    """Save raw and dark CSVs; when fit is supplied, also append fit results.
 
-    def __init__(
-        self,
-        blank_profile: GaussianProfile | None = None,
-        sample_profile: GaussianProfile | None = None,
-    ):
-        self.sample_profile = sample_profile or DoubleGaussianProfile()
-        self.wavelengths: np.ndarray | None = None
-        self.blank: BlankMeasurement | None = None
-
-    def analyze_blank(
-        self, name: str, wavelengths: np.ndarray, blank_dark: np.ndarray, blank_raw: np.ndarray
-    ) -> BlankMeasurement:
-        self.wavelengths = wavelengths
-        measurement = BlankMeasurement(
-            name=name,
-            wavelengths=wavelengths,
-            blank_raw=blank_raw,
-            blank_dark=blank_dark,
-        )
-        self.blank = measurement
-        return measurement
-
-    def analyze_sample(
-        self,
-        name: str,
-        sample_dark: np.ndarray,
-        sample_raw: np.ndarray,
-        cb: Callable[[float], None] | None = None,
-        end: Callable[[], None] | None = None,
-    ) -> SampleMeasurement:
-        if self.wavelengths is None:
-            raise ValueError("analyze_blank() must be called before analyze_sample()")
-        if self.blank is None:
-            raise ValueError("analyze_blank() must be called before analyze_sample()")
-        sample_corrected = sample_raw - sample_dark
-        sample_blank_adjusted = sample_corrected - self.blank.blank_corrected
-        sample_fit = self.sample_profile.fit(self.wavelengths, sample_blank_adjusted, cb=cb, end=end)
-        return SampleMeasurement(
-            name=name,
-            sample_raw=sample_raw,
-            sample_dark=sample_dark,
-            sample_fit=sample_fit,
-            blank=self.blank,
-            model=self.sample_profile,
-        )
-
-
-class RunExporter(MeasurementExporter):
-    """Exports measurement results and data into a run-specific sub-directory."""
-
-    def __init__(self, base_dir: pathlib.Path | str | None = None):
-        if base_dir is None:
-            env_dir = os.environ.get("QD_SPEC_DATA_DIR")
-            if env_dir:
-                self.base_dir = pathlib.Path(env_dir)
-            else:
-                self.base_dir = pathlib.Path.home() / ".qd_spec"
-        else:
-            self.base_dir = pathlib.Path(base_dir)
-
-        self.base_dir.mkdir(parents=True, exist_ok=True)
-
-        run_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.run_dir = self.base_dir / f"run_{run_id}"
-        self.results_path = self.base_dir / "fit_results.csv"  # Always append to main results file
-        self._exported_blank = False
-
-    def export(self, sample: SampleMeasurement) -> None:
-        self.run_dir.mkdir(parents=True, exist_ok=True)
-
-        # 1. Export Blank if not already done
-        if not self._exported_blank:
-            blank_name = sanitize_filename(f"{sample.blank.name}_blank")
-            blank_path = self.run_dir / f"{blank_name}.csv"
-            blank_dark_path = self.run_dir / f"{blank_name}_dark.csv"
-
-            pd.DataFrame({"Wavelength": sample.wavelengths, "intensity": sample.blank.blank_raw}).to_csv(
-                blank_path, index=False
-            )
-            pd.DataFrame({"Wavelength": sample.wavelengths, "intensity": sample.blank.blank_dark}).to_csv(
-                blank_dark_path, index=False
-            )
-            self._exported_blank = True
-
-        # 2. Export Sample Data
-        sample_uid = uuid.uuid4().hex[:8]
-        safe_name = sanitize_filename(sample.name)
-        sample_file_base = f"{safe_name}_{sample_uid}"
-
-        sample_path = self.run_dir / f"{sample_file_base}_sample.csv"
-        current_dark_path = self.run_dir / f"{sample_file_base}_dark.csv"
-
-        pd.DataFrame({"Wavelength": sample.wavelengths, "intensity": sample.sample_raw}).to_csv(
-            sample_path, index=False
-        )
-        pd.DataFrame({"Wavelength": sample.wavelengths, "intensity": sample.sample_dark}).to_csv(
-            current_dark_path, index=False
-        )
-
-        # 3. Export Sample Results
-        result = sample.sample_fit
-        # Improved fit_results structure with sample_uid for tracking
-        new_data = pd.DataFrame(
-            {"sample_uid": sample_uid, **{k: v.value for k, v in result.params.items()}}, index=[sample.name]
-        )
-        new_data.index.name = "sample_name"
-
+    Use one run directory per blank. Without a fit, filenames end in _blank
+    and _blank_dark. Samples get a random ID linking their files to the row
+    in run_dir.parent / 'fit_results.csv'. Returns the raw-spectrum path.
+    """
+    run_dir = Path(run_dir)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    safe_name = sanitize_filename(name) or "unnamed"
+    sample_uid = uuid.uuid4().hex[:8]
+    stem = f"{safe_name}_{sample_uid}" if fit is not None else f"{safe_name}_blank"
+    raw_path = run_dir / f"{stem}_sample.csv" if fit is not None else run_dir / f"{stem}.csv"
+    for path, intensity in ((raw_path, raw), (run_dir / f"{stem}_dark.csv", dark)):
+        pd.DataFrame({"Wavelength": wavelengths, "intensity": intensity}).to_csv(path, index=False)
+    if fit is not None:
+        row = {"sample_uid": sample_uid}
+        for key, param in fit.params.items():
+            row[key] = param.value
+            row[f"{key}_stderr"] = param.stderr
+        rows = pd.DataFrame(row, index=pd.Index([name], name="sample_name"))
+        results_path = run_dir.parent / "fit_results.csv"
         try:
-            df = pd.read_csv(self.results_path, index_col=0)
-            df = pd.concat([df, new_data])
+            rows = pd.concat([pd.read_csv(results_path, index_col=0), rows])
         except (FileNotFoundError, pd.errors.EmptyDataError):
-            df = new_data
-
-        df.to_csv(self.results_path, index=True)
-
-
-class BlankAcquirer:
-    """Explicit two-step blank acquisition orchestrated by the CLI."""
-
-    def __init__(self, session: QDSession, show_plot: bool = True):
-        self._session = session
-        self._spectrometer = session._require_active_spectrometer()
-        self._show_plot = show_plot
-        self._wavelengths = self._spectrometer.acquire_wavelengths()
-        self._blank_dark: np.ndarray | None = None
-        self._blank_raw: np.ndarray | None = None
-        self._measurement: BlankMeasurement | None = None
-
-    def capture_dark(self) -> np.ndarray:
-        self._blank_dark = self._spectrometer.acquire_spectrum()
-        return self._blank_dark
-
-    def capture_blank(self) -> np.ndarray:
-        self._blank_raw = self._spectrometer.acquire_spectrum()
-        return self._blank_raw
-
-    def analyze(self) -> BlankMeasurement:
-        if self._blank_dark is None:
-            raise ValueError("capture_dark() must be called before analyze().")
-        if self._blank_raw is None:
-            raise ValueError("capture_blank() must be called before analyze().")
-
-        measurement = self._session.analyzer.analyze_blank(
-            "blank", self._wavelengths, self._blank_dark, self._blank_raw
-        )
-        if self._show_plot:
-            self._session.plotter.show(self._session.plotter.plot_blank(measurement))
-        self._session.blank = measurement
-        self._measurement = measurement
-        return measurement
-
-
-class SampleAcquirer:
-    """Sample acquisition."""
-
-    def __init__(self, session: QDSession, show_plot: bool = True):
-        self._session = session
-        self._spectrometer = session._require_active_spectrometer()
-        self._show_plot = show_plot
-        self._sample_dark: np.ndarray | None = None
-        self._sample_raw: np.ndarray | None = None
-        self._measurement: SampleMeasurement | None = None
-        self._name: str | None = None
-
-    def set_name(self, name: str) -> None:
-        self._name = name
-
-    def capture_dark(self) -> np.ndarray:
-        self._sample_dark = self._spectrometer.acquire_spectrum()
-        return self._sample_dark
-
-    def capture_sample(self) -> np.ndarray:
-        if self._sample_dark is None:
-            raise ValueError("capture_dark() must be called before capture_sample().")
-        self._sample_raw = self._spectrometer.acquire_spectrum()
-        return self._sample_raw
-
-    def export(self) -> None:
-        if self._measurement is None:
-            raise ValueError("capture_sample() must complete before exporting.")
-        self._session.export_sample(self._measurement)
-
-    def analyze(
-        self,
-        cb: Callable[[float], None] | None = None,
-        end: Callable[[], None] | None = None,
-    ) -> SampleMeasurement:
-        if self._sample_dark is None:
-            raise ValueError("capture_dark() must be called before capture_sample().")
-        if self._sample_raw is None:
-            raise ValueError("capture_sample() must be called before finalizing.")
-        if self._name is None:
-            raise ValueError("set_name() must be called before finalizing.")
-
-        measurement = self._session.analyzer.analyze_sample(
-            self._name, self._sample_dark, self._sample_raw, cb=cb, end=end
-        )
-        if self._show_plot:
-            self._session.plotter.show(self._session.plotter.plot_sample(measurement))
-        self._measurement = measurement
-        return measurement
-
-
-class QDSession:
-    """Session manager for QD measurements with blank-first workflow."""
-
-    def __init__(
-        self,
-        settings: SpectrometerSettings | None = None,
-        exporter: MeasurementExporter | None = None,
-        plotter: QDPlotter | None = None,
-        analyzer: QDAnalyzer | None = None,
-    ):
-        self.settings = settings or SpectrometerSettings()
-        self.spectrometer: Spectrometer | None = None
-        self.analyzer = analyzer or QDAnalyzer()
-        self.plotter = plotter or QDPlotter()
-        self.exporter = exporter or RunExporter()
-        self.blank: BlankMeasurement | None = None
-
-    def __enter__(self):
-        self.spectrometer = Spectrometer(self.settings)
-        self.spectrometer.__enter__()
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if self.spectrometer:
-            self.spectrometer.__exit__(exc_type, exc_val, exc_tb)
-            self.spectrometer = None
-
-    def create_blank_acquirer(self, *, show_plot: bool = True) -> BlankAcquirer:
-        """Return a blank acquirer so the CLI can interleave prompts between captures."""
-
-        return BlankAcquirer(self, show_plot=show_plot)
-
-    def create_sample_acquirer(self, *, show_plot: bool = True) -> SampleAcquirer:
-        """Return a sample acquirer that reuses the session's validated blank."""
-
-        if self.blank is None:
-            raise ValueError("No blank available - acquire a blank before measuring samples.")
-        return SampleAcquirer(self, show_plot=show_plot)
-
-    def export_sample(self, sample: SampleMeasurement) -> None:
-        self.exporter.export(sample)
-
-    def clear_blank(self) -> None:
-        self.blank = None
-
-    @property
-    def has_blank(self) -> bool:
-        """Check if session has a validated blank."""
-        return self.blank is not None
-
-    @property
-    def is_active(self) -> bool:
-        """Check if session has an active spectrometer connection."""
-        return self.spectrometer is not None
-
-    def _require_active_spectrometer(self) -> Spectrometer:
-        if self.spectrometer is None:
-            raise ValueError("Session not active - use 'with QDSession() as session:'")
-        return self.spectrometer
+            pass
+        rows.to_csv(results_path)
+    return raw_path
