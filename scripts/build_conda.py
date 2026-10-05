@@ -1,4 +1,4 @@
-"""Build a Windows conda package and an offline bundle of all runtime dependencies.
+"""Build Windows conda packages, optionally bundling all runtime dependencies offline.
 
 The newest CPython ABI in the local Stellarnet driver folder selects the target
 Python version. Run with Python from a conda environment containing conda-build.
@@ -128,6 +128,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--vendor-dir", type=Path, help="Folder containing the vendor's Python drivers")
     parser.add_argument("--output", type=Path, default=ROOT / "dist", help="Output directory (default: dist)")
+    parser.add_argument("--offline-bundle", action="store_true", help="Also create a ZIP with all runtime dependencies")
     args = parser.parse_args()
     if sys.platform != "win32" or sys.maxsize <= 2**32:
         parser.error("This export targets Windows 64-bit; build it on 64-bit Windows.")
@@ -177,6 +178,8 @@ def main():
         ]
         for recipe in (source / "conda" / "sixel", source / "conda"):
             subprocess.run(build_command + [str(recipe)], check=True, env=env)
+        if not args.offline_bundle:
+            return
         prefix = source / "runtime"
         subprocess.run(
             conda

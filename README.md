@@ -106,16 +106,25 @@ specific folder. It chooses the **highest Python version with a win-64 driver**
 SHA-256 hashes. The conda package is pinned to that Python minor version.
 
 Required dependencies come directly from `pyproject.toml`. The recipe adds Tk
-for desktop plots and libusb for USB access. It builds and tests the package,
-then resolves and bundles its complete runtime environment, including Python
-and transitive dependencies. The sixel backend is built from its pinned GitHub
-revision as a separate conda package and included in the offline bundle.
+for desktop plots and libusb for USB access. The default build creates and tests
+the application and sixel conda packages. Vendor files are always bundled.
+The sixel backend is built from its pinned GitHub revision.
+
+To also resolve, verify, and bundle the complete runtime environment, including
+Python and transitive dependencies, opt in with:
+
+```sh
+python scripts/build_conda.py --offline-bundle
+```
+
+Default builds skip that extra environment creation and ZIP generation. Conda's
+package build tests still run.
 
 Outputs:
 
 - `dist/win-64/qd_spec-*.conda`: the application and vendor files, ready to add
   to a conda repository. Dependencies are declared in the package metadata.
-- `dist/qd_spec-*-win-64-offline.zip`: an indexed local conda channel containing
+- With `--offline-bundle`, `dist/qd_spec-*-win-64-offline.zip`: an indexed local conda channel containing
   the application **and every resolved runtime package**, with exact versions
   and SHA-256 hashes in `packages.json`.
 
