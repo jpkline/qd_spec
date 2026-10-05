@@ -7,7 +7,7 @@ peaks, and export plots and CSV data. The API has one stateful class,
 
 ## Install and run
 
-Use Python 3.11 or later:
+Use Python 3.12 or later for a source installation:
 
 ```sh
 python -m pip install -e .
@@ -17,6 +17,7 @@ qd-spec --data-dir ./measurements
 Hardware access also requires the vendor's `stellarnet_driverLibs` package and
 USB driver. If the package is in a downloaded folder, add its parent directory
 to `PYTHONPATH`. Offline fitting and plotting do not need the vendor driver.
+The conda export described below bundles the vendor Python library.
 
 The CLI prompts for a dark and solvent blank, lets you accept or retry it, then
 captures, fits, and optionally exports each sample. Defaults are 1000 ms and ten
@@ -87,3 +88,47 @@ It saves readings at short and default exposure settings.
 The former session, analyzer, profile, acquirer, plotter, and exporter classes
 have been removed. Their operations are now explicit function calls, as above.
 `Plotter.ipynb` remains a standalone presentation workflow with its own fit bounds.
+
+## Build a conda export
+
+On 64-bit Windows, create and activate a build environment:
+
+```sh
+conda create -n qd-build --override-channels -c conda-forge python=3.12 conda-build
+conda activate qd-build
+python scripts/build_conda.py
+```
+
+The script finds `stellarnet_driverLibs` in the project, Python import paths,
+or Downloads. Use `--vendor-dir PATH` or `STELLARNET_DRIVER_DIR` to select a
+specific folder. It chooses the **highest Python version with a win-64 driver**
+(currently 3.12), bundles that binary and `windows_only`, and records their
+SHA-256 hashes. The conda package is pinned to that Python minor version.
+
+Required dependencies come directly from `pyproject.toml`. The recipe adds Tk
+for desktop plots and libusb for USB access. It builds and tests the package,
+then resolves and bundles its complete runtime environment, including Python
+and transitive dependencies. The optional sixel extra remains a separate install.
+
+Outputs:
+
+- `dist/win-64/qd_spec-*.conda`: the application and vendor files, ready to add
+  to a conda repository. Dependencies are declared in the package metadata.
+- `dist/qd_spec-*-win-64-offline.zip`: an indexed local conda channel containing
+  the application **and every resolved runtime package**, with exact versions
+  and SHA-256 hashes in `packages.json`.
+
+To install without internet, extract the ZIP and run `install.ps1` in an
+Anaconda/Miniforge PowerShell prompt. It creates the `qd-spec` environment;
+pass `-Name another-name` to choose a different name. Then run
+`conda activate qd-spec` and `qd-spec`.
+
+The Windows USB driver may need its one-time OS installation on a new machine.
+Its setup program is included at
+`<environment>/Lib/site-packages/stellarnet_driverLibs/windows_only/InstallDriver.exe`;
+the package does not run installers automatically. Vendor files retain their
+separate license; see [VENDOR_NOTICE.md](VENDOR_NOTICE.md).
+
+The build never uploads anything. To host the offline channel, extract it into
+your repository directory; its `win-64` and `noarch` indexes are already generated.
+Use `--output PATH` to choose an export location instead of `dist`.

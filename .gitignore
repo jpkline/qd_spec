@@ -3,6 +3,8 @@ __pycache__
 *.egg-info
 /dist
 .venv/
+/vendor/
+/stellarnet_driverLibs/
 *.csv
 
 # Ignore data folders

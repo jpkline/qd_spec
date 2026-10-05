@@ -1,0 +1,51 @@
+{% set project = load_file_data('../pyproject.toml', from_recipe_dir=True)['project'] %}
+{% set vendor = load_file_data('../vendor-info.json', from_recipe_dir=True) %}
+
+package:
+  name: qd_spec
+  version: {{ project['version'] }}
+
+source:
+  path: ..
+
+build:
+  number: 0
+  skip: true  # [not win64]
+  entry_points:
+{% for name, target in project['scripts'].items() %}
+    - {{ name }} = {{ target }}
+{% endfor %}
+
+requirements:
+  host:
+    - python {{ vendor['python'] }}.*
+    - pip
+    - setuptools >=77.0.3
+  run:
+    - python {{ vendor['python'] }}.*
+{% for dependency in project['dependencies'] %}
+    - {{ dependency.replace('matplotlib', 'matplotlib-base') }}
+{% endfor %}
+    - tk
+    - libusb
+
+test:
+  source_files:
+    - tests/test_workflow.py
+  imports:
+    - qd_spec
+    - stellarnet_driverLibs.stellarnet_driver3
+  commands:
+    - python -c "import sys; assert '.'.join(map(str, sys.version_info[:2])) == '{{ vendor['python'] }}'"
+    - python -c "from stellarnet_driverLibs import stellarnet_driver3 as sn; print(sn.version())"
+    - python -m unittest discover -s tests -v
+    - qd-spec --help
+    - qd_spec --help
+
+about:
+  home: https://github.com/jpkline/qd_spec
+  summary: Quantum-dot spectroscopy with bundled Stellarnet driver
+  license: Apache-2.0 AND LicenseRef-StellarNet
+  license_file:
+    - LICENSE.md
+    - VENDOR_NOTICE.md
