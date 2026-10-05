@@ -2,8 +2,8 @@
 
 Acquire Stellarnet spectra, subtract dark and blank readings, fit two Gaussian
 peaks, and export plots and CSV data. The API has one stateful class,
-`Spectrometer`, and three functions: `fit_spectrum`, `plot_spectrum`, and
-`save_measurement`.
+`Spectrometer`, and four functions: `correct_spectrum`, `fit_spectrum`,
+`plot_spectrum`, and `save_measurement`.
 
 ## Install and run
 
@@ -39,17 +39,23 @@ with Spectrometer(integration_time=100, scans_to_average=5) as spec:
     input("Ready for sample? ")
     raw = spec.read()
 
-result = fit_spectrum(wavelengths, raw - dark)
+result = fit_spectrum(wavelengths, raw, dark)
 print(result.fit_report())
 figure = plot_spectrum(wavelengths, raw, dark, fit=result, name="sample-1")
 figure.savefig("sample-1.png")
 save_measurement("measurements/run_1", "sample-1", wavelengths, raw, dark, fit=result)
 ```
 
-For blank subtraction, use `(raw - dark) - (blank_raw - blank_dark)` when
-fitting, and pass `blank=blank_raw - blank_dark` when plotting. Arrays must be
-one-dimensional and use the same wavelength grid. Plotting returns a Matplotlib
-figure; call `plt.show()` to display it.
+For blank subtraction, pass `blank=blank_raw, blank_dark=blank_dark` to both
+`fit_spectrum` and `plot_spectrum`. They apply the same correction internally;
+callers do not need to subtract readings themselves. To obtain corrected data
+without fitting, use `correct_spectrum(raw, dark, blank=blank_raw,
+blank_dark=blank_dark)`. Omitted dark readings default to zero, and omitting
+the blank performs dark correction only. `fit_spectrum(wavelengths, corrected)`
+still accepts already-corrected data.
+
+Arrays must be one-dimensional and use the same wavelength grid. Plotting
+returns a Matplotlib figure; call `plt.show()` to display it.
 
 Fits are ordinary lmfit results. Each `a` is a peak height, each `x0` a center in
 nm, and each `dx` a standard deviation in nm; `yOff` is the constant baseline.

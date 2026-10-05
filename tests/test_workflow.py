@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from qd_spec import Spectrometer, fit_spectrum, plot_spectrum, save_measurement
+from qd_spec import Spectrometer, correct_spectrum, fit_spectrum, plot_spectrum, save_measurement
 from qd_spec.cli import run_cli
 
 
@@ -34,18 +34,37 @@ class WorkflowTests(unittest.TestCase):
         self.addCleanup(plt.close, "all")
 
     def test_fit_and_plot(self):
-        result = fit_spectrum(self.x, self.signal)
+        result = fit_spectrum(self.x, self.signal + self.blank, self.dark, blank=self.blank, blank_dark=self.dark)
         np.testing.assert_allclose(result.best_fit, self.signal, atol=1e-4)
         self.assertAlmostEqual(result.best_values["x01"], 650, places=3)
         self.assertAlmostEqual(result.best_values["x02"], 550, places=3)
         before = plt.rcParams["axes.facecolor"]
         fig = plot_spectrum(
-            self.x, self.signal + self.blank, self.dark, blank=self.blank - self.dark, fit=result, name="Synthetic"
+            self.x,
+            self.signal + self.blank,
+            self.dark,
+            blank=self.blank,
+            blank_dark=self.dark,
+            fit=result,
+            name="Synthetic",
         )
         self.assertEqual(len(fig.axes), 3)
         np.testing.assert_allclose(fig.axes[2].collections[0].get_offsets()[:, 1], self.signal)
         fig.canvas.draw()
         self.assertEqual(plt.rcParams["axes.facecolor"], before)
+
+    def test_correction_handles_unsigned_counts_without_changing_inputs(self):
+        raw = np.array([10, 20], dtype=np.uint16)
+        dark = np.array([15, 5], dtype=np.uint16)
+        blank = np.array([8, 4], dtype=np.uint16)
+        blank_dark = np.array([3, 9], dtype=np.uint16)
+        readings = (raw, dark, blank, blank_dark)
+        originals = [reading.copy() for reading in readings]
+        np.testing.assert_array_equal(correct_spectrum(raw, dark), [-5, 15])
+        np.testing.assert_array_equal(correct_spectrum(raw, dark, blank=blank, blank_dark=blank_dark), [-10, 20])
+        np.testing.assert_array_equal(correct_spectrum(raw), raw)
+        for reading, original in zip(readings, originals):
+            np.testing.assert_array_equal(reading, original)
 
     def test_exports_preserve_existing_columns_and_uncertainties(self):
         result = fit_spectrum(self.x, self.signal)

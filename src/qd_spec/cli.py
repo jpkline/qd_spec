@@ -10,7 +10,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 
-from .core import Spectrometer, fit_spectrum, plot_spectrum, save_measurement
+from . import Spectrometer, fit_spectrum, plot_spectrum, save_measurement
 
 
 def _confirm(message):
@@ -45,15 +45,14 @@ def run_cli(base_dir=None, *, integration_time=1000, scans_to_average=10):
             _show(plot_spectrum(wavelengths, blank_raw, blank_dark, name="Blank"))
             if _confirm("Accept this blank for the session?"):
                 break
-        blank = blank_raw - blank_dark
 
         while True:
             name = input("Enter sample name/ID: ").strip()
             dark = _capture(spec, "sample dark")
             raw = _capture(spec, "sample (QDs)")
             print("Fitting spectrum...", flush=True)
-            fit = fit_spectrum(wavelengths, raw - dark - blank)
-            _show(plot_spectrum(wavelengths, raw, dark, blank=blank, fit=fit, name=name))
+            fit = fit_spectrum(wavelengths, raw, dark, blank=blank_raw, blank_dark=blank_dark)
+            _show(plot_spectrum(wavelengths, raw, dark, blank=blank_raw, blank_dark=blank_dark, fit=fit, name=name))
             if _confirm("Export this sample?"):
                 if not blank_saved:
                     save_measurement(run_dir, "blank", wavelengths, blank_raw, blank_dark)

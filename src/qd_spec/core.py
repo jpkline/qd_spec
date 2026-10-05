@@ -72,13 +72,27 @@ def _double_gaussian(x, a1, x01, dx1, a2, x02, dx2, yOff):
     return _gaussian(x, a1, x01, dx1) + _gaussian(x, a2, x02, dx2) + yOff
 
 
-def fit_spectrum(wavelengths, intensity) -> lmfit.model.ModelResult:
-    """Fit two Gaussians and a constant baseline to a corrected spectrum.
+def correct_spectrum(raw, dark=0, *, blank=None, blank_dark=0) -> np.ndarray:
+    """Return (raw - dark) - (blank - blank_dark), without modifying inputs.
 
-    Pass ``(sample - sample_dark) - (blank - blank_dark)`` as intensity.
+    Omit the blank for dark correction only. Omitted dark readings are zero.
+    Convert counts to floats before subtracting to avoid unsigned underflow.
+    All supplied spectra must use the same wavelength grid.
+    """
+    corrected = np.asarray(raw, dtype=float) - np.asarray(dark, dtype=float)
+    if blank is not None:
+        corrected -= np.asarray(blank, dtype=float) - np.asarray(blank_dark, dtype=float)
+    return corrected
+
+
+def fit_spectrum(wavelengths, raw, dark=0, *, blank=None, blank_dark=0) -> lmfit.model.ModelResult:
+    """Correct the readings, then fit two Gaussians and a constant baseline.
+
+    Supply raw blank and dark readings, or omit them for already-corrected data.
     Amplitudes are peak heights; widths are standard deviations in nm.
     Smoothing is only used to guess peak centers; the fit uses original data.
     """
+    intensity = correct_spectrum(raw, dark, blank=blank, blank_dark=blank_dark)
     model = lmfit.Model(_double_gaussian)
     params = model.make_params(a1=50, x01=500, dx1=20, a2=50, x02=600, dx2=20, yOff=10)
     peak = wavelengths[gaussian_filter1d(intensity, sigma=5).argmax()]
@@ -93,15 +107,13 @@ def fit_spectrum(wavelengths, intensity) -> lmfit.model.ModelResult:
     return result
 
 
-def plot_spectrum(wavelengths, raw, dark, *, blank=None, fit=None, name="Spectrum"):
+def plot_spectrum(wavelengths, raw, dark, *, blank=None, blank_dark=0, fit=None, name="Spectrum"):
     """Return a figure with raw, dark, and corrected spectra.
 
-    ``blank`` is an optional dark-corrected blank. ``fit`` is the result of
-    fit_spectrum. Display with plt.show() or save with figure.savefig(path).
+    Pass the same raw blank and dark readings as for fit_spectrum. ``fit`` is
+    its result. Display with plt.show() or save with figure.savefig(path).
     """
-    corrected = raw - dark
-    if blank is not None:
-        corrected = corrected - blank
+    corrected = correct_spectrum(raw, dark, blank=blank, blank_dark=blank_dark)
     with plt.style.context("dark_background"):
         fig, axes = plt.subplot_mosaic(
             [["raw", "dark"], ["corrected", "corrected"]],
