@@ -114,7 +114,7 @@ def bundle_environment(prefix, channel, archive):
         "Unzip this folder, then run install.ps1 from an Anaconda/Miniforge PowerShell prompt.\n"
         "The bundle includes Python and all required runtime dependencies; no internet is needed.\n"
         "packages.json records exact versions and SHA-256 hashes.\n"
-        "The optional sixel extra is not included; normal Matplotlib plotting is available.\n",
+        "The required sixel backend is included; set MPLBACKEND=module://matplotlib-sixel-backend to use it.\n",
         encoding="utf-8",
     )
     with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_STORED) as output:
@@ -148,32 +148,35 @@ def main():
     env = os.environ.copy()
     env.pop("PYTHONPATH", None)
     env.setdefault("CONDA_PKGS_DIRS", str(build_dir / "conda-pkgs"))
-    env.update(PYTHONIOENCODING="utf-8", MPLBACKEND="Agg", MPLCONFIGDIR=str(build_dir / "matplotlib"))
+    env.update(
+        PYTHONIOENCODING="utf-8",
+        MPLBACKEND="Agg",
+        MPLCONFIGDIR=str(build_dir / "matplotlib"),
+        QD_SPEC_SKIP_DRIVER_INSTALL="1",
+    )
     conda = [sys.executable, "-m", "conda"]
     with tempfile.TemporaryDirectory(prefix="export-", dir=build_dir) as temporary:
         source = Path(temporary)
         stage_source(source, driver)
-        subprocess.run(
-            conda
-            + [
-                "build",
-                str(source / "conda"),
-                "--python",
-                python,
-                "--package-format",
-                "2",
-                "--no-anaconda-upload",
-                "--override-channels",
-                "-c",
-                "conda-forge",
-                "--croot",
-                str(build_dir / "conda"),
-                "--output-folder",
-                str(output),
-            ],
-            check=True,
-            env=env,
-        )
+        build_command = conda + [
+            "build",
+            "--python",
+            python,
+            "--package-format",
+            "2",
+            "--no-anaconda-upload",
+            "--override-channels",
+            "-c",
+            output.as_uri(),
+            "-c",
+            "conda-forge",
+            "--croot",
+            str(build_dir / "conda"),
+            "--output-folder",
+            str(output),
+        ]
+        for recipe in (source / "conda" / "sixel", source / "conda"):
+            subprocess.run(build_command + [str(recipe)], check=True, env=env)
         prefix = source / "runtime"
         subprocess.run(
             conda
@@ -187,13 +190,29 @@ def main():
                 "-c",
                 "conda-forge",
                 f"qd_spec={project['version']}",
-                f"python={python}",
                 "--quiet",
                 "-y",
             ],
             check=True,
             env=env,
         )
+        # Test the resolved environment, not just the package build environment.
+        runtime_env = {
+            **env,
+            "PATH": os.pathsep.join(str(prefix / part) for part in ("", "Library/bin", "Scripts"))
+            + os.pathsep
+            + env.get("PATH", ""),
+        }
+        subprocess.run(
+            [
+                str(prefix / "python.exe"),
+                "-c",
+                "import importlib, qd_spec, lmfit; importlib.import_module('matplotlib-sixel-backend')",
+            ],
+            check=True,
+            env=runtime_env,
+        )
+        subprocess.run([str(prefix / "Scripts" / "qd-spec.exe"), "--help"], check=True, env=runtime_env)
         archive = output / f"qd_spec-{project['version']}-py{python.replace('.', '')}-win-64-offline.zip"
         bundle_environment(prefix, source / "offline", archive)
 

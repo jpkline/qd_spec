@@ -9,7 +9,7 @@ source:
   path: ..
 
 build:
-  number: 0
+  number: 3
   skip: true  # [not win64]
   entry_points:
 {% for name, target in project['scripts'].items() %}
@@ -24,7 +24,11 @@ requirements:
   run:
     - python {{ vendor['python'] }}.*
 {% for dependency in project['dependencies'] %}
-    - {{ dependency.replace('matplotlib', 'matplotlib-base') }}
+{% if dependency.startswith('matplotlib-sixel-backend ') %}
+    - matplotlib-sixel-backend ==1.2.0
+{% else %}
+    - {{ dependency.replace('matplotlib', 'matplotlib-base', 1) }}
+{% endif %}
 {% endfor %}
     - tk
     - libusb
@@ -36,6 +40,7 @@ test:
     - qd_spec
     - stellarnet_driverLibs.stellarnet_driver3
   commands:
+    - python -c "import importlib; importlib.import_module('matplotlib-sixel-backend')"
     - python -c "import sys; assert '.'.join(map(str, sys.version_info[:2])) == '{{ vendor['python'] }}'"
     - python -c "from stellarnet_driverLibs import stellarnet_driver3 as sn; print(sn.version())"
     - python -m unittest discover -s tests -v

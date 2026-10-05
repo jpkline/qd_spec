@@ -1,0 +1,40 @@
+{% set project = load_file_data('../../pyproject.toml', from_recipe_dir=True)['project'] %}
+{% set sixel = namespace(revision='') %}
+{% for dependency in project['dependencies'] %}
+{% if dependency.startswith('matplotlib-sixel-backend ') %}
+{% set sixel.revision = dependency.rsplit('@', 1)[1] %}
+{% endif %}
+{% endfor %}
+
+package:
+  name: matplotlib-sixel-backend
+  version: 1.2.0
+
+source:
+  url: https://github.com/jpkline/matplotlib-sixel-backend/archive/{{ sixel.revision }}.tar.gz
+  sha256: 836706a96b169f08743010203d7ae527af5ceaba64290c343635e4d38009019a
+
+build:
+  number: 0
+  noarch: python
+  script: "{{ PYTHON }} -m pip install . --no-deps --no-build-isolation"
+
+requirements:
+  host:
+    - python >=3.12
+    - pip
+    - setuptools >=61
+  run:
+    - python >=3.12
+    - matplotlib-base >=3.11.2,<3.12
+    - pillow
+
+test:
+  commands:
+    - python -c "import importlib; importlib.import_module('matplotlib-sixel-backend')"
+
+about:
+  home: https://github.com/jpkline/matplotlib-sixel-backend
+  summary: Matplotlib plots in sixel terminals
+  license: GPL-3.0-or-later
+  license_file: LICENSE

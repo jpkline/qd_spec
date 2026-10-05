@@ -64,8 +64,8 @@ The existing bounds remain: amplitudes >= 50, widths >= 15 nm, centers between
 100 and 1200 nm. Smoothing only estimates starting centers. Bound warnings can
 indicate that the data does not support the assumed peaks.
 
-Matplotlib chooses its usual backend. For terminal sixel plots, install
-`python -m pip install -e '.[sixel]'` and set `MPLBACKEND` to
+Matplotlib chooses its usual backend. The sixel backend is a required dependency.
+For terminal sixel plots, set `MPLBACKEND` to
 `module://matplotlib-sixel-backend`.
 
 ## Files and checks
@@ -108,7 +108,8 @@ SHA-256 hashes. The conda package is pinned to that Python minor version.
 Required dependencies come directly from `pyproject.toml`. The recipe adds Tk
 for desktop plots and libusb for USB access. It builds and tests the package,
 then resolves and bundles its complete runtime environment, including Python
-and transitive dependencies. The optional sixel extra remains a separate install.
+and transitive dependencies. The sixel backend is built from its pinned GitHub
+revision as a separate conda package and included in the offline bundle.
 
 Outputs:
 
@@ -118,15 +119,37 @@ Outputs:
   the application **and every resolved runtime package**, with exact versions
   and SHA-256 hashes in `packages.json`.
 
+Install from the indexed `dist` channel by package name so conda resolves all
+dependencies, including the locally built sixel backend:
+
+```sh
+conda install --override-channels -c file:///D:/qd_spec/dist -c conda-forge qd_spec
+```
+
+Use your export directory's file URL if it differs. Installing a `.conda` file
+directly bypasses dependency resolution. If the archive was installed directly,
+ask conda to update the package's dependencies when reinstalling from the channel:
+
+```sh
+conda install --update-deps --override-channels -c file:///D:/qd_spec/dist -c conda-forge qd_spec
+```
+
 To install without internet, extract the ZIP and run `install.ps1` in an
 Anaconda/Miniforge PowerShell prompt. It creates the `qd-spec` environment;
 pass `-Name another-name` to choose a different name. Then run
 `conda activate qd-spec` and `qd-spec`.
 
-The Windows USB driver may need its one-time OS installation on a new machine.
-Its setup program is included at
-`<environment>/Lib/site-packages/stellarnet_driverLibs/windows_only/InstallDriver.exe`;
-the package does not run installers automatically. Vendor files retain their
+The Windows package runs the bundled `InstallDriver.exe` in a conda post-link
+hook when installed. Windows requests administrator approval; accept it to
+install the system USB driver. Cancelling or an installer error fails the conda
+installation. Set `QD_SPEC_SKIP_DRIVER_INSTALL=1` before installing to skip
+driver setup when it is already installed or during automated deployments.
+The hook decodes DPInst's status: driver counts are successful results, while
+failure flags cause an error. If a reboot is needed, conda displays a message.
+The export builder sets this option for its temporary test environments.
+The setup program remains available at
+`<environment>/Lib/site-packages/stellarnet_driverLibs/windows_only/InstallDriver.exe`.
+Vendor files retain their
 separate license; see [VENDOR_NOTICE.md](VENDOR_NOTICE.md).
 
 The build never uploads anything. To host the offline channel, extract it into
