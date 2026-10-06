@@ -48,8 +48,9 @@ class ExportTests(unittest.TestCase):
             selected = find_vendor(vendor)
             self.assertEqual(selected.name, "stellarnet_driver3.cp312-win_amd64.pyd")
             staged = root / "source"
-            stage_source(staged, selected)
+            stage_source(staged, selected, build_number=17)
             self.assertEqual(json.loads((staged / "vendor-info.json").read_text())["python"], "3.12")
+            self.assertEqual(json.loads((staged / "vendor-info.json").read_text())["build_number"], 17)
             bundled = staged / "vendor" / "stellarnet_driverLibs"
             self.assertEqual([path.name for path in bundled.glob("*.pyd")], [selected.name])
             manifest = json.loads((bundled / "manifest.json").read_text())

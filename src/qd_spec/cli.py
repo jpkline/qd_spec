@@ -92,12 +92,15 @@ def run_cli(base_dir=None, *, integration_time=1000, scans_to_average=10):
             raw = _capture(spec, "sample (QDs)", seconds_estimate)
             print("Fitting spectrum...", flush=True)
             fit = fit_spectrum(wavelengths, raw, dark, blank=blank_raw, blank_dark=blank_dark)
-            _show(plot_spectrum(wavelengths, raw, dark, blank=blank_raw, blank_dark=blank_dark, fit=fit, name=name))
+            figure = plot_spectrum(
+                wavelengths, raw, dark, blank=blank_raw, blank_dark=blank_dark, fit=fit, name=name
+            )
+            _show(figure)
             if _confirm("Export this sample?"):
                 if not blank_saved:
                     save_measurement(run_dir, "blank", wavelengths, blank_raw, blank_dark)
                     blank_saved = True
-                path = save_measurement(run_dir, name, wavelengths, raw, dark, fit=fit)
+                path = save_measurement(run_dir, name, wavelengths, raw, dark, fit=fit, figure=figure)
                 print(f"Saved {path}")
             count += 1
             if not _confirm("Measure another sample with the same blank?"):

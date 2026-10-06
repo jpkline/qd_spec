@@ -43,8 +43,7 @@ with Spectrometer(integration_time=100, scans_to_average=5) as spec:
 result = fit_spectrum(wavelengths, raw, dark)
 print(result.fit_report())
 figure = plot_spectrum(wavelengths, raw, dark, fit=result, name="sample-1")
-figure.savefig("sample-1.png")
-save_measurement("measurements/run_1", "sample-1", wavelengths, raw, dark, fit=result)
+save_measurement("measurements/run_1", "sample-1", wavelengths, raw, dark, fit=result, figure=figure)
 ```
 
 For blank subtraction, pass `blank=blank_raw, blank_dark=blank_dark` to both
@@ -71,8 +70,9 @@ Acquisition uses the original `alive-progress` spinner from Git history.
 ## Files and checks
 
 Use one run directory per blank. `save_measurement` writes raw and dark CSVs
-with `Wavelength` and `intensity` columns. With `fit=...`, it gives sample files
-a random ID and appends parameters and `_stderr` uncertainties to
+with `Wavelength` and `intensity` columns. Pass `figure=...` to save its PNG in
+the same directory. With `fit=...`, the CSVs and PNG share the sanitized sample
+name and a random ID, and parameters and `_stderr` uncertainties are appended to
 `fit_results.csv` in the run directory's parent. Without a fit, it saves a
 blank pair. Existing result columns are preserved; use one writer at a time.
 
@@ -119,6 +119,9 @@ python scripts/build_conda.py --offline-bundle
 
 Default builds skip that extra environment creation and ZIP generation. Conda's
 package build tests still run.
+Each build increments the application build number using packages already in
+the output directory, so conda does not reuse an older cached build with the
+same version and filename. Keep the output directory between builds.
 
 Outputs:
 

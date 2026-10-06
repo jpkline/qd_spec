@@ -138,8 +138,8 @@ def plot_spectrum(wavelengths, raw, dark, *, blank=None, blank_dark=0, fit=None,
     return fig
 
 
-def save_measurement(run_dir, name, wavelengths, raw, dark, *, fit=None) -> Path:
-    """Save raw and dark CSVs; when fit is supplied, also append fit results.
+def save_measurement(run_dir, name, wavelengths, raw, dark, *, fit=None, figure=None) -> Path:
+    """Save raw and dark CSVs, an optional plot, and optional fit results.
 
     Use one run directory per blank. Without a fit, filenames end in _blank
     and _blank_dark. Samples get a random ID linking their files to the row
@@ -153,6 +153,8 @@ def save_measurement(run_dir, name, wavelengths, raw, dark, *, fit=None) -> Path
     raw_path = run_dir / f"{stem}_sample.csv" if fit is not None else run_dir / f"{stem}.csv"
     for path, intensity in ((raw_path, raw), (run_dir / f"{stem}_dark.csv", dark)):
         pd.DataFrame({"Wavelength": wavelengths, "intensity": intensity}).to_csv(path, index=False)
+    if figure is not None:
+        figure.savefig(run_dir / f"{stem}.png")
     if fit is not None:
         row = {"sample_uid": sample_uid}
         for key, param in fit.params.items():

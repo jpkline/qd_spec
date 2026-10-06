@@ -9,7 +9,8 @@ source:
   path: ..
 
 build:
-  number: 3
+  number: {{ vendor['build_number'] }}
+  string: py{{ vendor['python'].replace('.', '') }}_{{ vendor['build_number'] }}
   skip: true  # [not win64]
   entry_points:
 {% for name, target in project['scripts'].items() %}

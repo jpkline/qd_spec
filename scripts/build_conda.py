@@ -53,7 +53,7 @@ def find_vendor(explicit=None):
     return max(drivers, key=driver_version).resolve()
 
 
-def stage_source(destination, driver):
+def stage_source(destination, driver, build_number=4):
     """Copy release sources and the selected vendor files, with SHA-256 hashes."""
     shutil.copytree(
         ROOT / "src" / "qd_spec", destination / "src" / "qd_spec", ignore=shutil.ignore_patterns("__pycache__")
@@ -64,7 +64,9 @@ def stage_source(destination, driver):
     for name in ("pyproject.toml", "README.md", "LICENSE.md", "VENDOR_NOTICE.md"):
         shutil.copy2(ROOT / name, destination / name)
     python = ".".join(map(str, driver_version(driver)))
-    (destination / "vendor-info.json").write_text(json.dumps({"python": python}), encoding="utf-8")
+    (destination / "vendor-info.json").write_text(
+        json.dumps({"python": python, "build_number": build_number}), encoding="utf-8"
+    )
     bundled = destination / "vendor" / "stellarnet_driverLibs"
     bundled.mkdir(parents=True)
     shutil.copy2(driver, bundled / driver.name)
@@ -146,6 +148,15 @@ def main():
     build_dir.mkdir(exist_ok=True)
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
+    package_prefix = f"qd_spec-{project['version']}-py{python.replace('.', '')}_"
+    previous_builds = [
+        int(path.stem.removeprefix(package_prefix))
+        for path in (output / "win-64").glob(f"{package_prefix}*.conda")
+        if path.stem.removeprefix(package_prefix).isdigit()
+    ]
+    build_number = max([3, *previous_builds]) + 1
+    package_spec = f"qd_spec={project['version']}=py{python.replace('.', '')}_{build_number}"
+    print(f"Building {package_spec}", flush=True)
     env = os.environ.copy()
     env.pop("PYTHONPATH", None)
     env.setdefault("CONDA_PKGS_DIRS", str(build_dir / "conda-pkgs"))
@@ -158,7 +169,7 @@ def main():
     conda = [sys.executable, "-m", "conda"]
     with tempfile.TemporaryDirectory(prefix="export-", dir=build_dir) as temporary:
         source = Path(temporary)
-        stage_source(source, driver)
+        stage_source(source, driver, build_number)
         build_command = conda + [
             "build",
             "--python",
@@ -192,7 +203,7 @@ def main():
                 output.as_uri(),
                 "-c",
                 "conda-forge",
-                f"qd_spec={project['version']}",
+                package_spec,
                 "--quiet",
                 "-y",
             ],
