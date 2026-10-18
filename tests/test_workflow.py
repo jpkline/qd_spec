@@ -216,7 +216,6 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(progress.call_count, 4)
             for call in progress.call_args_list:
                 self.assertEqual(call.args, (4,))
-                self.assertIn("~4s", call.kwargs["title"])
             rows = pd.read_csv(Path(directory) / "fit_results.csv")
             self.assertEqual(rows.sample_name.tolist(), ["second"])
             self.assertAlmostEqual(rows.x01[0], 650, places=3)

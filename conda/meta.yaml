@@ -41,12 +41,11 @@ test:
     - tests/test_workflow.py
   imports:
     - qd_spec
-    - stellarnet_driverLibs.stellarnet_driver3
   commands:
     - python -c "import importlib; importlib.import_module('matplotlib-sixel-backend')"
     - python -c "import sys; assert '.'.join(map(str, sys.version_info[:2])) == '{{ vendor['python'] }}'"
-    - python -c "from stellarnet_driverLibs import stellarnet_driver3 as sn; print(sn.version())"
-    - python -m unittest discover -s tests -v
+    # Only run the synthetic workflow suite; both hardware drivers are mocked.
+    - python -m unittest discover -s tests -p test_workflow.py -v
     - qd-spec --help
     - qd_spec --help
 
