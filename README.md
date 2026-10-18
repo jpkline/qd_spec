@@ -15,14 +15,18 @@ qd-spec --data-dir ./measurements
 ```
 
 Hardware access also requires the vendor's `stellarnet_driverLibs` package and
-USB driver. If the package is in a downloaded folder, add its parent directory
+USB driver, plus a Coherent Cube serial connection. If the vendor package is in
+a downloaded folder, add its parent directory
 to `PYTHONPATH`. Offline fitting and plotting do not need the vendor driver.
 The conda export described below bundles the vendor Python library.
 
-The CLI prompts for a dark and solvent blank, lets you accept or retry it, then
-captures, fits, and optionally exports each sample. Defaults are 1000 ms and ten
-averaged scans; use `--integration-time` and `--scans` to change them. Ctrl+C
-ends acquisition and releases the device.
+The CLI asks for the Coherent Cube COM port (`--laser-port` or
+`COHERENT_CUBE_PORT`), then acquires ten dark/light pairs for the solvent blank
+and each sample. For every pair it turns the laser off, reads one dark, turns
+the laser on, and reads one illuminated spectrum. Each read defaults to 1000 ms
+with spectrometer averaging set to one. Use `--integration-time` and `--pairs`
+to change exposure and pair count. Ctrl+C turns the laser off and releases both
+devices.
 
 Output defaults to `QD_SPEC_DATA_DIR`, or `~/.qd_spec` if unset. Both
 `python -m qd_spec` and `qd_spec` also launch the CLI.
@@ -54,8 +58,13 @@ blank_dark=blank_dark)`. Omitted dark readings default to zero, and omitting
 the blank performs dark correction only. `fit_spectrum(wavelengths, corrected)`
 still accepts already-corrected data.
 
-Arrays must be one-dimensional and use the same wavelength grid. Plotting
-returns a Matplotlib figure; call `plt.show()` to display it.
+Arrays may be one-dimensional or have one row per paired exposure. Fitting
+corrects each pair with its own dark, subtracts the corresponding corrected
+blank pair, then averages those corrected spectra for one fit.
+With a blank, plotting averages blank and sample readings in the upper panels;
+otherwise it averages raw and dark readings. The lower panel shows the mean
+of the individually corrected pairs and its fit. Call `plt.show()` to display
+the returned Matplotlib figure.
 
 Fits are ordinary lmfit results. Each `a` is a peak height, each `x0` a center in
 nm, and each `dx` a standard deviation in nm; `yOff` is the constant baseline.
@@ -74,7 +83,9 @@ with `Wavelength` and `intensity` columns. Pass `figure=...` to save its PNG in
 the same directory. With `fit=...`, the CSVs and PNG share the sanitized sample
 name and a random ID, and parameters and `_stderr` uncertainties are appended to
 `fit_results.csv` in the run directory's parent. Without a fit, it saves a
-blank pair. Existing result columns are preserved; use one writer at a time.
+blank pair. With paired arrays, every exposure has a numbered CSV: a default
+sample produces ten light and ten dark files. Existing result columns are
+preserved; use one writer at a time.
 
 ```sh
 python -m unittest discover -s tests -v

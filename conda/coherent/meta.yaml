@@ -1,0 +1,31 @@
+package:
+  name: coherent-cube
+  version: 0.0.3.post1
+
+source:
+  url: https://files.pythonhosted.org/packages/source/c/coherent-cube/coherent_cube-0.0.3.post1.tar.gz
+  sha256: 445837d66ba05552024b567979232996dab9340552fac25351cc94ddbde3bb55
+
+build:
+  number: 0
+  noarch: python
+  script: "{{ PYTHON }} -m pip install . --no-deps --no-build-isolation"
+
+requirements:
+  host:
+    - python >=3.12
+    - pip
+    - hatchling
+  run:
+    - python >=3.12
+    - pyserial
+
+test:
+  imports:
+    - coherent_cube
+
+about:
+  home: https://github.com/bicarlsen/coherent-cube
+  summary: Controller for Coherent Cube lasers
+  license: MIT
+  license_file: LICENSE.txt

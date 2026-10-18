@@ -8,6 +8,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+from alive_progress import alive_bar
+
 os.environ["MPLBACKEND"] = "Agg"
 
 import matplotlib.pyplot as plt
@@ -34,13 +36,21 @@ class WorkflowTests(unittest.TestCase):
                     os.environ.pop("MPLBACKEND", None)
                     if override:
                         os.environ["MPLBACKEND"] = override
-                    cli.run_cli()
+                    cli.run_cli(laser_port="COM1")
                 use.assert_called_with(expected)
 
-    def test_cli_spinner_propagates_read_failure_and_releases_device(self):
+    def test_cli_propagates_read_failure_and_releases_device(self):
         self.driver.getSpectrum_Y.side_effect = RuntimeError("read failed")
         with patch("builtins.input", return_value=""), self.assertRaisesRegex(RuntimeError, "read failed"):
-            run_cli()
+            run_cli(laser_port="COM1")
+        self.driver.reset.assert_called_once()
+        self.laser.off.assert_called()
+
+    def test_failed_laser_on_leaves_laser_off(self):
+        self.laser.on.side_effect = RuntimeError("laser failed")
+        with patch("builtins.input", return_value=""), self.assertRaisesRegex(RuntimeError, "laser failed"):
+            run_cli(laser_port="COM1")
+        self.assertGreaterEqual(self.laser.off.call_count, 2)
         self.driver.reset.assert_called_once()
 
     def setUp(self):
@@ -53,7 +63,17 @@ class WorkflowTests(unittest.TestCase):
         self.driver.getSpectrum_X.return_value = self.x.tolist()
         self.driver.getSpectrum_Y.return_value = self.signal.tolist()
         vendor = SimpleNamespace(stellarnet_driver3=self.driver)
-        self.vendor_patch = patch.dict("sys.modules", {"stellarnet_driverLibs": vendor})
+        self.laser = Mock()
+        self.laser.__enter__ = Mock(return_value=self.laser)
+        self.laser.__exit__ = Mock(return_value=None)
+        self.laser_factory = Mock(return_value=self.laser)
+        self.vendor_patch = patch.dict(
+            "sys.modules",
+            {
+                "stellarnet_driverLibs": vendor,
+                "coherent_cube": SimpleNamespace(CoherentCube=self.laser_factory),
+            },
+        )
         self.vendor_patch.start()
         self.addCleanup(self.vendor_patch.stop)
         self.addCleanup(plt.close, "all")
@@ -77,6 +97,21 @@ class WorkflowTests(unittest.TestCase):
         np.testing.assert_allclose(fig.axes[2].collections[0].get_offsets()[:, 1], self.signal)
         fig.canvas.draw()
         self.assertEqual(plt.rcParams["axes.facecolor"], before)
+
+    def test_fit_and_main_plot_use_mean_of_corrected_pairs(self):
+        dark = np.stack([self.dark + index for index in range(10)])
+        blank_dark = np.stack([self.dark + 2 * index for index in range(10)])
+        blank = blank_dark + 20 + np.arange(10)[:, None]
+        raw = dark + blank - blank_dark + self.signal + np.arange(10)[:, None]
+        corrected = correct_spectrum(raw, dark, blank=blank, blank_dark=blank_dark)
+        np.testing.assert_allclose(corrected, self.signal + np.arange(10)[:, None])
+        fit = fit_spectrum(self.x, raw, dark, blank=blank, blank_dark=blank_dark)
+        np.testing.assert_allclose(fit.best_fit, corrected.mean(axis=0), atol=1e-3)
+        figure = plot_spectrum(self.x, raw, dark, blank=blank, blank_dark=blank_dark, fit=fit)
+        self.assertEqual(len(figure.axes[2].collections), 1)
+        np.testing.assert_allclose(figure.axes[0].collections[0].get_offsets()[:, 1], blank.mean(axis=0))
+        np.testing.assert_allclose(figure.axes[1].collections[0].get_offsets()[:, 1], raw.mean(axis=0))
+        np.testing.assert_allclose(figure.axes[2].collections[0].get_offsets()[:, 1], corrected.mean(axis=0))
 
     def test_correction_handles_unsigned_counts_without_changing_inputs(self):
         raw = np.array([10, 20], dtype=np.uint16)
@@ -113,6 +148,19 @@ class WorkflowTests(unittest.TestCase):
             for path in files:
                 self.assertEqual(pd.read_csv(path).columns.tolist(), ["Wavelength", "intensity"])
 
+    def test_exports_every_pair(self):
+        with tempfile.TemporaryDirectory() as directory:
+            readings = np.stack([self.signal + index for index in range(10)])
+            darks = np.stack([self.dark + index for index in range(10)])
+            path = save_measurement(directory, "paired", self.x, readings, darks, fit=fit_spectrum(self.x, self.signal))
+            self.assertTrue(path.name.endswith("_sample_01.csv"))
+            self.assertEqual(len(list(Path(directory).glob("*_sample_*.csv"))), 10)
+            self.assertEqual(len(list(Path(directory).glob("*_dark_*.csv"))), 10)
+            np.testing.assert_allclose(pd.read_csv(path).intensity, readings[0])
+            np.testing.assert_allclose(
+                pd.read_csv(path.with_name(path.name.replace("_sample_01", "_dark_01"))).intensity, darks[0]
+            )
+
     def test_hardware_settings_and_close(self):
         with Spectrometer(integration_time=50, scans_to_average=2) as spec:
             self.driver.setParam.assert_called_once_with(
@@ -138,39 +186,60 @@ class WorkflowTests(unittest.TestCase):
         self.driver.reset.assert_called_once()
 
     def test_cli_retries_blank_and_only_exports_selected_samples(self):
-        self.driver.getSpectrum_Y.side_effect = [
-            self.dark,
-            self.blank + 100,
-            self.dark,
-            self.blank,
-            self.dark,
-            self.signal + self.blank,
-            self.dark,
-            self.signal + self.blank,
-        ]
-        answers = ["", "", "n", "", "", "y", "first", "", "", "n", "y", "second", "", "", "y", "n"]
+        readings = []
+        for offset in (100, 0, 0, 0):
+            for index in range(2):
+                dark = self.dark + index
+                light = dark + 20 + offset
+                if len(readings) >= 8:
+                    light = light + self.signal
+                readings.extend((dark, light))
+        self.laser.lit = True
+        self.laser.off.side_effect = lambda: setattr(self.laser, "lit", False)
+        self.laser.on.side_effect = lambda: setattr(self.laser, "lit", True)
+        reading_order = iter(enumerate(readings))
+
+        def read_at_laser_state(_device):
+            index, reading = next(reading_order)
+            self.assertEqual(self.laser.lit, bool(index % 2))
+            return reading
+
+        self.driver.getSpectrum_Y.side_effect = read_at_laser_state
+        answers = ["", "n", "", "y", "first", "", "n", "y", "second", "", "y", "n"]
         with (
             tempfile.TemporaryDirectory() as directory,
             patch("builtins.input", side_effect=answers),
             patch("matplotlib.pyplot.show"),
+            patch("qd_spec.cli.alive_bar", wraps=alive_bar) as progress,
         ):
-            run_cli(directory)
+            run_cli(directory, pairs=2, laser_port="COM1")
+            self.assertEqual(progress.call_count, 4)
+            for call in progress.call_args_list:
+                self.assertEqual(call.args, (4,))
+                self.assertIn("~4s", call.kwargs["title"])
             rows = pd.read_csv(Path(directory) / "fit_results.csv")
             self.assertEqual(rows.sample_name.tolist(), ["second"])
             self.assertAlmostEqual(rows.x01[0], 650, places=3)
             run_dir = next(Path(directory).glob("run_*"))
-            self.assertEqual(len(list(run_dir.glob("*.csv"))), 4)
+            self.assertEqual(len(list(run_dir.glob("*.csv"))), 8)
             plot_path = next(run_dir.glob("second_*.png"))
             self.assertGreater(plot_path.stat().st_size, 0)
             self.assertFalse(list(run_dir.glob("first_*.png")))
-            np.testing.assert_array_equal(pd.read_csv(run_dir / "blank_blank.csv").intensity, self.blank)
+            np.testing.assert_array_equal(pd.read_csv(run_dir / "blank_blank_01.csv").intensity, readings[5])
         self.driver.reset.assert_called_once()
-        self.assertEqual(self.driver.getSpectrum_Y.call_count, 8)
+        self.driver.setParam.assert_called_once_with(
+            self.driver.array_get_spec_only.return_value, 1000, 1, 0, 3, clear=True
+        )
+        self.laser_factory.assert_called_once_with("COM1", timeout=10, write_timeout=10)
+        self.assertEqual(self.driver.getSpectrum_Y.call_count, 16)
+        self.assertEqual(self.laser.off.call_count, 18)
+        self.assertEqual(self.laser.on.call_count, 12)
 
     def test_cli_interruption_releases_device(self):
         with patch("builtins.input", side_effect=KeyboardInterrupt), self.assertRaises(KeyboardInterrupt):
-            run_cli()
+            run_cli(laser_port="COM1")
         self.driver.reset.assert_called_once()
+        self.assertEqual(self.laser.off.call_count, 3)
 
 
 if __name__ == "__main__":

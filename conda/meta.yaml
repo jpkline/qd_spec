@@ -27,6 +27,8 @@ requirements:
 {% for dependency in project['dependencies'] %}
 {% if dependency.startswith('matplotlib-sixel-backend ') %}
     - matplotlib-sixel-backend ==1.2.0
+{% elif dependency.startswith('coherent-cube') %}
+    - coherent-cube ==0.0.3.post1
 {% else %}
     - {{ dependency.replace('matplotlib', 'matplotlib-base', 1) }}
 {% endif %}

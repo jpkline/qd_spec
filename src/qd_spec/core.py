@@ -89,10 +89,15 @@ def fit_spectrum(wavelengths, raw, dark=0, *, blank=None, blank_dark=0) -> lmfit
     """Correct the readings, then fit two Gaussians and a constant baseline.
 
     Supply raw blank and dark readings, or omit them for already-corrected data.
+    Two-dimensional inputs are corrected by row, then averaged for one fit.
     Amplitudes are peak heights; widths are standard deviations in nm.
     Smoothing is only used to guess peak centers; the fit uses original data.
     """
     intensity = correct_spectrum(raw, dark, blank=blank, blank_dark=blank_dark)
+    if intensity.ndim not in (1, 2) or intensity.shape[-1] != len(wavelengths):
+        raise ValueError("Spectra must be one-dimensional or paired rows on the wavelength grid")
+    if intensity.ndim == 2:
+        intensity = intensity.mean(axis=0)
     model = lmfit.Model(_double_gaussian)
     params = model.make_params(a1=50, x01=500, dx1=20, a2=50, x02=600, dx2=20, yOff=10)
     peak = wavelengths[gaussian_filter1d(intensity, sigma=5).argmax()]
@@ -108,12 +113,15 @@ def fit_spectrum(wavelengths, raw, dark=0, *, blank=None, blank_dark=0) -> lmfit
 
 
 def plot_spectrum(wavelengths, raw, dark, *, blank=None, blank_dark=0, fit=None, name="Spectrum"):
-    """Return a figure with raw, dark, and corrected spectra.
+    """Return a figure with averaged upper panels and corrected spectrum.
 
-    Pass the same raw blank and dark readings as for fit_spectrum. ``fit`` is
-    its result. Display with plt.show() or save with figure.savefig(path).
+    With a blank, the upper panels show mean blank and sample readings. Without
+    one, they show mean raw and dark readings. The lower panel shows the mean
+    of individually corrected pairs and its fit.
+    Display with plt.show() or save with figure.savefig(path).
     """
     corrected = correct_spectrum(raw, dark, blank=blank, blank_dark=blank_dark)
+    mean_corrected = np.atleast_2d(corrected).mean(axis=0)
     with plt.style.context("dark_background"):
         fig, axes = plt.subplot_mosaic(
             [["raw", "dark"], ["corrected", "corrected"]],
@@ -121,19 +129,30 @@ def plot_spectrum(wavelengths, raw, dark, *, blank=None, blank_dark=0, fit=None,
             figsize=(8, 7),
             layout="constrained",
         )
-        for ax, title, data in zip(axes.values(), (name, "Dark", "Corrected spectrum"), (raw, dark, corrected)):
+        upper = (("Blank", blank), (name, raw)) if blank is not None else ((name, raw), ("Dark", dark))
+        for ax, (title, data) in zip((axes["raw"], axes["dark"]), upper):
+            data = np.atleast_2d(data).mean(axis=0)
             ax.scatter(wavelengths, data, s=5, alpha=0.6, color="#5DA9E9", linewidths=0)
             ax.set(
                 title=title, xlabel="Wavelength [nm]", ylabel="Intensity", xlim=(wavelengths.min(), wavelengths.max())
             )
             ax.grid(alpha=0.15)
+        ax = axes["corrected"]
+        ax.scatter(wavelengths, mean_corrected, s=5, alpha=0.6, color="#5DA9E9", linewidths=0)
+        ax.set(
+            title="Corrected spectrum",
+            xlabel="Wavelength [nm]",
+            ylabel="Intensity",
+            xlim=(wavelengths.min(), wavelengths.max()),
+        )
+        ax.grid(alpha=0.15)
         if fit is not None:
             ax = axes["corrected"]
             params = fit.best_values
             for i, color in enumerate(("#C97C5D", "#C6A0CF"), start=1):
                 component = _gaussian(wavelengths, params[f"a{i}"], params[f"x0{i}"], params[f"dx{i}"])
                 ax.plot(wavelengths, component + params["yOff"], "--", color=color, label=f"Peak {i}")
-            ax.plot(wavelengths, fit.best_fit, color="#E6AF2E", label="Fit")
+            ax.plot(wavelengths, _double_gaussian(wavelengths, **params), color="#E6AF2E", label="Fit")
             ax.legend()
     return fig
 
@@ -141,9 +160,9 @@ def plot_spectrum(wavelengths, raw, dark, *, blank=None, blank_dark=0, fit=None,
 def save_measurement(run_dir, name, wavelengths, raw, dark, *, fit=None, figure=None) -> Path:
     """Save raw and dark CSVs, an optional plot, and optional fit results.
 
-    Use one run directory per blank. Without a fit, filenames end in _blank
-    and _blank_dark. Samples get a random ID linking their files to the row
-    in run_dir.parent / 'fit_results.csv'. Returns the raw-spectrum path.
+    Use one run directory per blank. Each row of a paired array gets a numbered
+    raw/dark CSV pair. Samples get a random ID linking their files to the row
+    in run_dir.parent / 'fit_results.csv'. Returns the first raw-spectrum path.
     """
     run_dir = Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -151,8 +170,16 @@ def save_measurement(run_dir, name, wavelengths, raw, dark, *, fit=None, figure=
     sample_uid = uuid.uuid4().hex[:8]
     stem = f"{safe_name}_{sample_uid}" if fit is not None else f"{safe_name}_blank"
     raw_path = run_dir / f"{stem}_sample.csv" if fit is not None else run_dir / f"{stem}.csv"
-    for path, intensity in ((raw_path, raw), (run_dir / f"{stem}_dark.csv", dark)):
-        pd.DataFrame({"Wavelength": wavelengths, "intensity": intensity}).to_csv(path, index=False)
+    raw_rows, dark_rows = np.atleast_2d(raw), np.atleast_2d(dark)
+    if raw_rows.shape != dark_rows.shape or raw_rows.shape[1] != len(wavelengths):
+        raise ValueError("Raw and dark readings must have matching shapes on the wavelength grid")
+    for index, (light, background) in enumerate(zip(raw_rows, dark_rows), start=1):
+        suffix = f"_{index:02d}" if len(raw_rows) > 1 else ""
+        light_path = raw_path.with_name(f"{raw_path.stem}{suffix}.csv")
+        dark_path = run_dir / f"{stem}_dark{suffix}.csv"
+        for path, intensity in ((light_path, light), (dark_path, background)):
+            pd.DataFrame({"Wavelength": wavelengths, "intensity": intensity}).to_csv(path, index=False)
+    raw_path = raw_path.with_name(f"{raw_path.stem}_01.csv") if len(raw_rows) > 1 else raw_path
     if figure is not None:
         figure.savefig(run_dir / f"{stem}.png")
     if fit is not None:

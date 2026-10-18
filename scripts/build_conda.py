@@ -187,7 +187,7 @@ def main():
             "--output-folder",
             str(output),
         ]
-        for recipe in (source / "conda" / "sixel", source / "conda"):
+        for recipe in (source / "conda" / "sixel", source / "conda" / "coherent", source / "conda"):
             subprocess.run(build_command + [str(recipe)], check=True, env=env)
         if not args.offline_bundle:
             return
@@ -221,7 +221,7 @@ def main():
             [
                 str(prefix / "python.exe"),
                 "-c",
-                "import importlib, qd_spec, lmfit; importlib.import_module('matplotlib-sixel-backend')",
+                "import importlib, qd_spec, lmfit, coherent_cube; importlib.import_module('matplotlib-sixel-backend')",
             ],
             check=True,
             env=runtime_env,
