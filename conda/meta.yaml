@@ -1,0 +1,58 @@
+{% set project = load_file_data('../pyproject.toml', from_recipe_dir=True)['project'] %}
+{% set vendor = load_file_data('../vendor-info.json', from_recipe_dir=True) %}
+
+package:
+  name: qd_spec
+  version: {{ project['version'] }}
+
+source:
+  path: ..
+
+build:
+  number: {{ vendor['build_number'] }}
+  string: py{{ vendor['python'].replace('.', '') }}_{{ vendor['build_number'] }}
+  skip: true  # [not win64]
+  entry_points:
+{% for name, target in project['scripts'].items() %}
+    - {{ name }} = {{ target }}
+{% endfor %}
+
+requirements:
+  host:
+    - python {{ vendor['python'] }}.*
+    - pip
+    - setuptools >=77.0.3
+  run:
+    - python {{ vendor['python'] }}.*
+{% for dependency in project['dependencies'] %}
+{% if dependency.startswith('matplotlib-sixel-backend ') %}
+    - matplotlib-sixel-backend ==1.2.0
+{% elif dependency.startswith('coherent-cube') %}
+    - coherent-cube ==0.0.3.post1
+{% else %}
+    - {{ dependency.replace('matplotlib', 'matplotlib-base', 1) }}
+{% endif %}
+{% endfor %}
+    - tk
+    - libusb
+
+test:
+  source_files:
+    - tests/test_workflow.py
+  imports:
+    - qd_spec
+  commands:
+    - python -c "import importlib; importlib.import_module('matplotlib-sixel-backend')"
+    - python -c "import sys; assert '.'.join(map(str, sys.version_info[:2])) == '{{ vendor['python'] }}'"
+    # Only run the synthetic workflow suite; both hardware drivers are mocked.
+    - python -m unittest discover -s tests -p test_workflow.py -v
+    - qd-spec --help
+    - qd_spec --help
+
+about:
+  home: https://github.com/jpkline/qd_spec
+  summary: Quantum-dot spectroscopy with bundled Stellarnet driver
+  license: Apache-2.0 AND LicenseRef-StellarNet
+  license_file:
+    - LICENSE.md
+    - VENDOR_NOTICE.md
